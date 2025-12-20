@@ -902,6 +902,7 @@
             <div class="api-repeater-footer">
                 <button id="export-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #4CAF50; border-radius: 5px;">💾 Export</button>
                 <button id="import-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #2196F3; border-radius: 5px;">📥 Import</button>
+                <a href="https://github.com/mailming/Action-Replay-HwH-Ext/tree/main/library" target="_blank" style="font-size: 16px; padding: 8px 15px; background: #9C27B0; border-radius: 5px; color: #fce1ac; text-decoration: none; display: inline-block; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">📚 Templates</a>
                 <button id="delete-all-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #ff4444; border-radius: 5px;">🗑️ Delete All</button>
             </div>
         `;
