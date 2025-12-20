@@ -4,6 +4,7 @@
 // @version      1.1.3
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
+// @license      You can modify as long as you credit me, though using a pre-existing license is recommended. Contact: gamepla@gmail.com
 // @match        https://www.hero-wars.com/*
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
 // @grant        none

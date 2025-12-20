@@ -37,6 +37,10 @@ Action Replay replays recordings **sequentially** (one at a time) to avoid firin
 ## Notes
 - Internally the script stores and replays captured api calls, but the UI uses *actions/replay* wording.
 
+## License
+You are free to modify and use this extension as long as you credit the original author. Using a pre-existing license is recommended for clarity.
+
+For licensing questions or permissions, please contact: **gamepla@gmail.com**
 
 ## Raw install URL
 
