@@ -38,6 +38,12 @@
     let isPlaying = false; // Track if playback is active
     let playAllAborted = false; // Flag to abort playback
     let rushMode = false; // Rush mode: run all recordings simultaneously
+    let autoCollectRewards = false; // Auto collect quest rewards on script load
+    
+    // Quest collection constants
+    const QUEST_COLLECTION_MAX_ITERATIONS = 50;
+    const QUEST_COLLECTION_DELAY = 100;
+    const QUEST_ID_FILTER_THRESHOLD = 1780000000;
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -246,6 +252,18 @@
 
         // Auto-execute enabled recordings
         scheduleAutoRuns();
+        
+        // Auto-collect quest rewards if enabled
+        if (autoCollectRewards) {
+            setTimeout(async () => {
+                try {
+                    console.log(`${EXTENSION_NAME}: Auto-collecting quest rewards...`);
+                    await collectAllQuestRewards();
+                } catch (error) {
+                    console.error(`${EXTENSION_NAME}: Error in auto quest reward collection:`, error);
+                }
+            }, 12000); // Wait 12 seconds after script load
+        }
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -318,12 +336,14 @@
         const { HWHFuncs } = window;
         const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
         rushMode = settings.rushMode || false;
+        autoCollectRewards = settings.autoCollectRewards || false;
     }
 
     function saveSettings() {
         const { HWHFuncs } = window;
         HWHFuncs.setSaveVal(STORAGE_SETTINGS, {
-            rushMode: rushMode
+            rushMode: rushMode,
+            autoCollectRewards: autoCollectRewards
         });
     }
 
@@ -753,6 +773,193 @@
         }, initialDelayMs);
     }
 
+    // --- QUEST REWARDS COLLECTION ---
+    async function collectAllQuestRewards() {
+        try {
+            const { Send, HWHFuncs, Caller } = window;
+            const farmQuestIds = new Set();
+            let totalCollected = 0;
+            let iteration = 0;
+
+            // Collect only quests with ID > 1780000000
+            while (iteration < QUEST_COLLECTION_MAX_ITERATIONS) {
+                iteration++;
+                console.log(`Action Replay: Quest collection iteration ${iteration}`);
+
+                // Use Caller if available (HWH standard), otherwise fallback to Send
+                let questGetAll;
+                if (Caller) {
+                    questGetAll = await new Caller('questGetAll').execute();
+                } else {
+                    const response = await Send({ calls: [{ name: 'questGetAll', args: {}, context: { actionTs: Math.floor(performance.now()) }, ident: 'body' }] });
+                    questGetAll = response?.questGetAll || response;
+                }
+                
+                const allQuests = Array.isArray(questGetAll) ? questGetAll : Object.values(questGetAll || {});
+                
+                // Filter for completed quests (state === 2) with ID > 1780000000 only
+                const questsToFarm = allQuests.filter(q => {
+                    if (!q || q.state !== 2) return false;
+                    const questId = +q.id;
+                    return questId && !isNaN(questId) && questId > QUEST_ID_FILTER_THRESHOLD;
+                });
+
+                if (questsToFarm.length === 0) {
+                    console.log(`Action Replay: No more quests to collect (ID > ${QUEST_ID_FILTER_THRESHOLD})`);
+                    break;
+                }
+
+                const questIdsToFarm = [];
+                for (const quest of questsToFarm) {
+                    const questId = +quest.id;
+                    if (questId && !isNaN(questId) && !farmQuestIds.has(questId)) {
+                        questIdsToFarm.push(questId);
+                        farmQuestIds.add(questId);
+                    }
+                }
+
+                if (questIdsToFarm.length === 0) {
+                    console.log(`Action Replay: All available quests already collected`);
+                    break;
+                }
+
+                // Collect each quest individually (one by one)
+                let successfulCount = 0;
+                let failedQuestIds = [];
+                const allSideResults = [];
+
+                for (const questId of questIdsToFarm) {
+                    try {
+                        let farmResults;
+                        let sideResult = null;
+                        
+                        // Use Caller if available (HWH standard), otherwise fallback to Send
+                        if (Caller) {
+                            const farmCaller = new Caller();
+                            farmCaller.add({
+                                name: 'questFarm',
+                                args: { questId },
+                            });
+                            farmResults = await farmCaller.send();
+                            const sideResults = farmResults.sideResult('questFarm', true) || [];
+                            sideResult = sideResults[0];
+                        } else {
+                            const farmResult = await Send({ 
+                                calls: [{ 
+                                    name: 'questFarm', 
+                                    args: { questId }, 
+                                    context: { actionTs: Math.floor(performance.now()) }, 
+                                    ident: 'body' 
+                                }] 
+                            });
+                            
+                            // Extract side results if available
+                            if (farmResult && typeof farmResult === 'object') {
+                                if (farmResult.sideResult) {
+                                    const sideResults = Array.isArray(farmResult.sideResult) ? farmResult.sideResult : [farmResult.sideResult];
+                                    sideResult = sideResults.find(sr => sr && (sr.questId === questId || sr.quest || sr.newQuests));
+                                } else if (farmResult.questFarm) {
+                                    sideResult = farmResult.questFarm;
+                                }
+                            }
+                        }
+
+                        if (sideResult?.error) {
+                            const error = sideResult.error;
+                            const errorName = (typeof error === 'object' ? error.name : '') || '';
+                            const errorDesc = (typeof error === 'object' ? error.description : String(error)) || '';
+
+                            if (errorName === 'NotAvailable' ||
+                                errorDesc.includes('not pass farm requirements') ||
+                                errorDesc.includes('not available')) {
+                                failedQuestIds.push(questId);
+                                farmQuestIds.delete(questId);
+                                console.log(`Action Replay: Skipping quest ${questId} - ${errorDesc || errorName}`);
+                            } else {
+                                successfulCount++;
+                                allSideResults.push(sideResult);
+                            }
+                        } else {
+                            successfulCount++;
+                            if (sideResult) {
+                                allSideResults.push(sideResult);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Action Replay: Error farming quest ${questId}:`, error);
+                        
+                        const errorMessage = error.message || error.toString() || '';
+                        const isNotAvailableError = errorMessage.includes('NotAvailable') ||
+                            errorMessage.includes('not pass farm requirements') ||
+                            errorMessage.includes('not available');
+
+                        if (isNotAvailableError) {
+                            failedQuestIds.push(questId);
+                            farmQuestIds.delete(questId);
+                            console.log(`Action Replay: Skipping quest ${questId} - ${errorMessage}`);
+                        }
+                    }
+
+                    // Small delay between individual quest calls
+                    await new Promise(resolve => setTimeout(resolve, QUEST_COLLECTION_DELAY));
+                }
+
+                totalCollected += successfulCount;
+                if (successfulCount > 0) {
+                    console.log(`Action Replay: Collected ${successfulCount} quest reward(s)`);
+                    const { HWHFuncs } = window;
+                    HWHFuncs.setProgress(`Action Replay: Collected ${successfulCount} quest reward(s)`, false);
+                }
+                if (failedQuestIds.length > 0) {
+                    console.log(`Action Replay: Skipped ${failedQuestIds.length} quest(s) that don't meet farm requirements`);
+                }
+
+                // Check for newly unlocked quests (only high-ID quests)
+                let hasNewQuests = false;
+                for (const sideResult of allSideResults) {
+                    if (!sideResult) continue;
+
+                    const quests = [...(sideResult.newQuests ?? []), ...(sideResult.quests ?? [])];
+                    for (const quest of quests) {
+                        if (quest?.state === 2) {
+                            const newQuestId = +quest.id;
+                            if (newQuestId && newQuestId > QUEST_ID_FILTER_THRESHOLD && !farmQuestIds.has(newQuestId)) {
+                                hasNewQuests = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasNewQuests) break;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, QUEST_COLLECTION_DELAY * 2));
+
+                if (!hasNewQuests && successfulCount === 0) {
+                    break;
+                }
+            }
+
+            if (iteration >= QUEST_COLLECTION_MAX_ITERATIONS) {
+                console.warn(`Action Replay: Quest collection reached max iterations (${QUEST_COLLECTION_MAX_ITERATIONS})`);
+            }
+
+            if (totalCollected > 0) {
+                console.log(`Action Replay: Quest collection completed. Total collected: ${totalCollected}`);
+                const { HWHFuncs } = window;
+                HWHFuncs.setProgress(`Action Replay: Quest collection completed. Total collected: ${totalCollected}`, true);
+            } else {
+                console.log(`Action Replay: No quest rewards to collect`);
+            }
+
+            return totalCollected;
+        } catch (error) {
+            console.error(`Action Replay: Error collecting quest rewards:`, error);
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('Action Replay: Error collecting quest rewards', true);
+            return 0;
+        }
+    }
+
     // --- EXPORT/IMPORT ---
     function exportRecordings() {
         const { HWHFuncs } = window;
@@ -942,7 +1149,7 @@
         
         popup.innerHTML = `
             <button class="api-repeater-close-btn">&times;</button>
-            <h2>Action Replay</h2>
+            <h2>Action Replay <span style="background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.6em; font-weight: bold; margin-left: 10px; text-transform: uppercase; letter-spacing: 1px;">🏆 Tournament</span></h2>
             <div class="api-repeater-controls">
                 <button id="start-recording-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: ${isRecording ? '#ff4444' : '#4CAF50'}; border-radius: 5px;">
                     ${isRecording ? '⏹ Stop Recording' : '⏺ Start Recording'}
@@ -961,6 +1168,10 @@
                 <label style="cursor: pointer; color: #ff4444; font-weight: bold; display: flex; align-items: center; gap: 8px;">
                     <input type="checkbox" id="rush-mode-checkbox" ${rushMode ? 'checked' : ''} style="margin-right: 5px;">
                     <span>⚡ Rush Mode (⚠️ CAUTION: May cause ban - runs all recordings simultaneously)</span>
+                </label>
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="auto-collect-rewards-checkbox" ${autoCollectRewards ? 'checked' : ''} style="margin-right: 5px;">
+                    <span>🎁 Auto Collect Quest Rewards (collects rewards recursively on script load)</span>
                 </label>
             </div>
         `;
@@ -1003,6 +1214,10 @@
         document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
         document.getElementById('rush-mode-checkbox').addEventListener('change', (e) => {
             rushMode = e.target.checked;
+            saveSettings();
+        });
+        document.getElementById('auto-collect-rewards-checkbox').addEventListener('change', (e) => {
+            autoCollectRewards = e.target.checked;
             saveSettings();
         });
     }
