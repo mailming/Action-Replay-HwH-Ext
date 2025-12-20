@@ -28,11 +28,15 @@
     let originalSend = null;
     let recordingButton = null; // Reference to the recording button
     let recordingButtonText = null; // Cached reference to button text element
+    let playAllButton = null; // Reference to the play all button
+    let playAllButtonText = null; // Cached reference to play all button text element
     let updateButtonInterval = null; // Interval for updating button
     let lastBufferCount = 0; // Track last buffer count to avoid unnecessary DOM updates
     let lastRecordingState = null; // Track last recording state to force update on state change
     let executionQueue = Promise.resolve(); // Serialize executions (auto-run + manual run)
     let autoRunScheduled = false; // Prevent duplicate scheduling on reloads/rehydration
+    let isPlaying = false; // Track if playback is active
+    let playAllAborted = false; // Flag to abort playback
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -196,7 +200,7 @@
             console.warn('Action Replay: Action capture may not be working - originalSend is null');
         }
 
-        // Add menu button and recording button in the same row
+        // Add menu button, recording button, and play all button in the same row
         const scriptMenu = HWHClasses.ScriptMenu.getInst();
         const buttonGroup = scriptMenu.addCombinedButton([
             {
@@ -210,20 +214,31 @@
                 title: 'Click to start/stop recording actions',
                 onClick: toggleRecording,
                 color: 'red'
+            },
+            {
+                name: '▶️',
+                title: 'Play all enabled recordings',
+                onClick: togglePlayAll,
+                color: 'blue'
             }
         ]);
         
         // Get reference to recording button (second button in combined row)
         // buttonGroup is a div with class 'scriptMenu_btnRow', buttons are children
-        if (buttonGroup && buttonGroup.children && buttonGroup.children.length > 1) {
+        if (buttonGroup && buttonGroup.children && buttonGroup.children.length > 2) {
             recordingButton = buttonGroup.children[1]; // Second button (index 1)
+            playAllButton = buttonGroup.children[2]; // Third button (index 2)
             // Cache button text element for performance
             recordingButtonText = recordingButton.querySelector('.scriptMenu_btnPlate');
+            playAllButtonText = playAllButton.querySelector('.scriptMenu_btnPlate');
         }
         
         // Start interval to update recording button (only when needed)
         // Use requestAnimationFrame for better performance, but fallback to interval
         updateButtonInterval = setInterval(updateRecordingButton, 500);
+        
+        // Initialize play all button state
+        updatePlayAllButton();
 
         // Auto-execute enabled recordings
         scheduleAutoRuns();
@@ -413,6 +428,112 @@
         return true;
     }
 
+    function deleteAllRecordings() {
+        if (recordings.length === 0) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('Action Replay: No recordings to delete', true);
+            return;
+        }
+        
+        const confirmMessage = `Are you sure you want to delete all ${recordings.length} recording(s)? This action cannot be undone.`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        recordings = [];
+        saveRecordings();
+        
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress('Action Replay: All recordings deleted', true);
+        
+        // Refresh the popup if it's open
+        const popup = document.getElementById('api-repeater-popup-container');
+        if (popup) {
+            populateRecordingsList();
+        }
+    }
+
+    function togglePlayAll() {
+        if (isPlaying) {
+            stopPlayback();
+        } else {
+            playAllRecordings();
+        }
+    }
+
+    function playAllRecordings() {
+        const now = Date.now();
+        const enabledRecordings = recordings.filter(rec => {
+            if (!rec.autoRun) return false;
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
+            return true;
+        });
+
+        if (enabledRecordings.length === 0) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('Action Replay: No enabled recordings to play', true);
+            return;
+        }
+
+        isPlaying = true;
+        playAllAborted = false;
+        updatePlayAllButton();
+
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress(`Action Replay: Playing all ${enabledRecordings.length} enabled recording(s)...`, true);
+
+        // Execute all enabled recordings sequentially
+        enabledRecordings.forEach((rec) => {
+            enqueueExecution(async () => {
+                if (playAllAborted) {
+                    return;
+                }
+                try {
+                    await executeRecordingInternal(rec);
+                } catch (e) {
+                    console.error('Action Replay: Error during play all:', e);
+                } finally {
+                    if (!playAllAborted) {
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+            });
+        });
+
+        // Wait for all executions to complete, then update button
+        executionQueue.then(() => {
+            isPlaying = false;
+            updatePlayAllButton();
+            if (!playAllAborted) {
+                HWHFuncs.setProgress('Action Replay: All recordings completed', true);
+            }
+        }).catch(() => {
+            isPlaying = false;
+            updatePlayAllButton();
+        });
+    }
+
+    function stopPlayback() {
+        playAllAborted = true;
+        isPlaying = false;
+        updatePlayAllButton();
+        
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress('Action Replay: Playback stopped', true);
+    }
+
+    function updatePlayAllButton() {
+        if (!playAllButton || !playAllButtonText) return;
+        
+        if (isPlaying) {
+            playAllButtonText.textContent = '⏹';
+            playAllButton.title = 'Stop playback';
+        } else {
+            playAllButtonText.textContent = '▶️';
+            playAllButton.title = 'Play all enabled recordings';
+        }
+    }
+
     // --- EXECUTION SYSTEM ---
     async function executeRecording(recording) {
         // Always serialize to avoid parallel execution (server risk)
@@ -438,6 +559,12 @@
         
         // Execute the recording repeatCount times
         for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex++) {
+            // Check for abort
+            if (playAllAborted) {
+                HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
+                return;
+            }
+            
             if (repeatCount > 1) {
                 HWHFuncs.setProgress(`Action Replay: ${recording.name} - Replay ${repeatIndex + 1}/${repeatCount}...`, true);
             }
@@ -448,6 +575,12 @@
             
             // Execute API calls one by one to avoid duplicate ident errors
             for (let i = 0; i < recording.apiCalls.length; i++) {
+                // Check for abort before each API call
+                if (playAllAborted) {
+                    HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
+                    return;
+                }
+                
                 const call = recording.apiCalls[i];
                 
                 try {
@@ -498,6 +631,11 @@
                 // Add delay between calls (similar to Auto Daily Extension)
                 if (i < recording.apiCalls.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+                    // Check for abort after delay
+                    if (playAllAborted) {
+                        HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
+                        return;
+                    }
                 }
             }
             
@@ -508,6 +646,11 @@
             // Add delay between repeats (if more than one repeat)
             if (repeatIndex < repeatCount - 1) {
                 await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between repeats
+                // Check for abort after delay
+                if (playAllAborted) {
+                    HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
+                    return;
+                }
             }
         }
         
@@ -759,6 +902,7 @@
             <div class="api-repeater-footer">
                 <button id="export-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #4CAF50; border-radius: 5px;">💾 Export</button>
                 <button id="import-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #2196F3; border-radius: 5px;">📥 Import</button>
+                <button id="delete-all-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #ff4444; border-radius: 5px;">🗑️ Delete All</button>
             </div>
         `;
         
@@ -797,6 +941,7 @@
         
         document.getElementById('export-btn').addEventListener('click', exportRecordings);
         document.getElementById('import-btn').addEventListener('click', importRecordings);
+        document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
     }
 
     function populateRecordingsList() {

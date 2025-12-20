@@ -11,8 +11,10 @@ A HeroWarsHelper (HWH) extension that **records actions you do in the game UI** 
 - Use the HWH menu button **Action Replay**.
 - Click **Start Recording**, perform the actions in-game, then **Stop Recording** and **Save Recording**.
 - You can record **one action** (e.g., a single click) or a **series of actions** (e.g., multiple clicks in sequence).
+- **Play All Button** (blue ▶️/⏹ icon): Click to play all enabled recordings (same as auto-run on script load). Click again to stop/interrupt current playback.
 - On the dashboard, you can **specify the number of replays** for each recording using the repeat count field.
 - You can **manage actions** on the dashboard: edit, delete, reorder, or expand to view individual actions within each recording.
+- Use the **Delete All** button in the dashboard footer to remove all recordings at once (with confirmation).
 - Enable **Auto** on a recording to replay it on load.
 
 ## Export & Import
@@ -26,6 +28,10 @@ A HeroWarsHelper (HWH) extension that **records actions you do in the game UI** 
 - Click the **Import** button in the Action Replay popup to load recordings from a JSON file.
 - Imported recordings are merged with your existing recordings (duplicate IDs are automatically assigned new IDs).
 - This is useful for restoring backups or adding pre-made recording templates.
+
+### Delete All Recordings
+- Click the **Delete All** button in the dashboard footer to remove all recordings at once.
+- A confirmation dialog will appear before deletion (this action cannot be undone).
 
 ### Recording Templates Library
 - Check out the [library folder](https://github.com/mailming/Action-Replay-HwH-Ext/tree/main/library) for pre-made recording templates you can import.
