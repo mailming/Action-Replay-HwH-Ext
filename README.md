@@ -16,3 +16,9 @@ Action Replay replays recordings **sequentially** (one at a time) to avoid firin
 
 ## Notes
 - Internally the script stores and replays captured calls, but the UI uses *actions/replay* wording.
+
+
+## Raw install URL
+
+https://github.com/mailming/Action-Replay-HwH-Ext/raw/refs/heads/main/Action%20Replay%20HwH%20Ext.user.js
+

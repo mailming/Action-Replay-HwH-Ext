@@ -1,4 +1,4 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
 // @version      1.1.3
@@ -8,8 +8,8 @@
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
 // @grant        none
 // @run-at       document-start
-// @downloadURL https://github.com/mailming/AutoHero/raw/refs/heads/develop/Action%20Replay%20HwH%20Ext.user.js
-// @updateURL https://github.com/mailming/AutoHero/raw/refs/heads/develop/Action%20Replay%20HwH%20Ext.user.js
+// @downloadURL https://github.com/mailming/Action-Replay-HwH-Ext/raw/refs/heads/main/Action%20Replay%20HwH%20Ext.user.js
+// @updateURL https://github.com/mailming/Action-Replay-HwH-Ext/raw/refs/heads/main/Action%20Replay%20HwH%20Ext.user.js
 // ==/UserScript==
 
 (function() {
@@ -1354,4 +1354,5 @@
     waitForHWH(initializeExtension);
 
 })();
+
 
