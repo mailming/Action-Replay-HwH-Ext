@@ -1,0 +1,20 @@
+# Branch Management Rules
+
+## Branch Structure
+- **main**: Production branch - stable version
+- **tournament**: Tournament-specific branch with additional features
+
+## Merge Rules
+- ✅ **ALWAYS merge main → tournament** (merge main into tournament branch)
+- ❌ **NEVER merge tournament → main** (do not merge tournament back to main)
+
+## Workflow
+1. Make changes in main branch for stable features
+2. Merge main into tournament to keep tournament up-to-date with main
+3. Add tournament-specific features only in tournament branch
+4. Tournament branch may have features that should not go back to main
+
+## Git Commands
+- To merge main into tournament: `git checkout tournament && git merge main`
+- Never run: `git checkout main && git merge tournament`
+
