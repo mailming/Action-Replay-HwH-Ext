@@ -11,6 +11,8 @@ A HeroWarsHelper (HWH) extension that **records actions you do in the game UI** 
 - Use the HWH menu button **Action Replay**.
 - Click **Start Recording**, perform the actions in-game, then **Stop Recording** and **Save Recording**.
 - You can record **one action** (e.g., a single click) or a **series of actions** (e.g., multiple clicks in sequence).
+- On the dashboard, you can **specify the number of replays** for each recording using the repeat count field.
+- You can **manage actions** on the dashboard: edit, delete, reorder, or expand to view individual actions within each recording.
 - Enable **Auto** on a recording to replay it on load.
 
 ## Export & Import
@@ -38,6 +40,8 @@ Action Replay replays recordings **sequentially** (one at a time) to avoid firin
 - Internally the script stores and replays captured api calls, but the UI uses *actions/replay* wording.
 
 ## License
+Copyright (c) gamepla
+
 You are free to modify and use this extension as long as you credit the original author. Using a pre-existing license is recommended for clarity.
 
 For licensing questions or permissions, please contact: **gamepla@gmail.com**
