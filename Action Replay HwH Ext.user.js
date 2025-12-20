@@ -37,6 +37,7 @@
     let autoRunScheduled = false; // Prevent duplicate scheduling on reloads/rehydration
     let isPlaying = false; // Track if playback is active
     let playAllAborted = false; // Flag to abort playback
+    let rushMode = false; // Rush mode: run all recordings simultaneously
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -189,6 +190,9 @@
 
         // Load recordings from storage
         loadRecordings();
+        
+        // Load settings (rush mode)
+        loadSettings();
 
         // Setup API interception
         setupAPIInterseption();
@@ -308,6 +312,19 @@
             HWHFuncs.setSaveVal(STORAGE_RECORDINGS, recordings);
             saveRecordingsTimeout = null;
         }, 100);
+    }
+
+    function loadSettings() {
+        const { HWHFuncs } = window;
+        const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
+        rushMode = settings.rushMode || false;
+    }
+
+    function saveSettings() {
+        const { HWHFuncs } = window;
+        HWHFuncs.setSaveVal(STORAGE_SETTINGS, {
+            rushMode: rushMode
+        });
     }
 
     // --- RECORDING MANAGEMENT ---
@@ -480,37 +497,66 @@
         updatePlayAllButton();
 
         const { HWHFuncs } = window;
-        HWHFuncs.setProgress(`Action Replay: Playing all ${enabledRecordings.length} enabled recording(s)...`, true);
+        const modeText = rushMode ? 'simultaneously (RUSH MODE)' : 'sequentially';
+        HWHFuncs.setProgress(`Action Replay: Playing all ${enabledRecordings.length} enabled recording(s) ${modeText}...`, true);
 
-        // Execute all enabled recordings sequentially
-        enabledRecordings.forEach((rec) => {
-            enqueueExecution(async () => {
-                if (playAllAborted) {
-                    return;
-                }
-                try {
-                    await executeRecordingInternal(rec);
-                } catch (e) {
-                    console.error('Action Replay: Error during play all:', e);
-                } finally {
-                    if (!playAllAborted) {
-                        await new Promise(r => setTimeout(r, 2000));
+        if (rushMode) {
+            // Rush mode: Execute all recordings simultaneously
+            const promises = enabledRecordings.map((rec) => {
+                return (async () => {
+                    if (playAllAborted) {
+                        return;
                     }
-                }
+                    try {
+                        await executeRecordingInternal(rec);
+                    } catch (e) {
+                        console.error('Action Replay: Error during play all (rush mode):', e);
+                    }
+                })();
             });
-        });
+            
+            // Wait for all executions to complete
+            Promise.all(promises).then(() => {
+                isPlaying = false;
+                updatePlayAllButton();
+                if (!playAllAborted) {
+                    HWHFuncs.setProgress('Action Replay: All recordings completed', true);
+                }
+            }).catch(() => {
+                isPlaying = false;
+                updatePlayAllButton();
+            });
+        } else {
+            // Normal mode: Execute all enabled recordings sequentially
+            enabledRecordings.forEach((rec) => {
+                enqueueExecution(async () => {
+                    if (playAllAborted) {
+                        return;
+                    }
+                    try {
+                        await executeRecordingInternal(rec);
+                    } catch (e) {
+                        console.error('Action Replay: Error during play all:', e);
+                    } finally {
+                        if (!playAllAborted) {
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
+                    }
+                });
+            });
 
-        // Wait for all executions to complete, then update button
-        executionQueue.then(() => {
-            isPlaying = false;
-            updatePlayAllButton();
-            if (!playAllAborted) {
-                HWHFuncs.setProgress('Action Replay: All recordings completed', true);
-            }
-        }).catch(() => {
-            isPlaying = false;
-            updatePlayAllButton();
-        });
+            // Wait for all executions to complete, then update button
+            executionQueue.then(() => {
+                isPlaying = false;
+                updatePlayAllButton();
+                if (!playAllAborted) {
+                    HWHFuncs.setProgress('Action Replay: All recordings completed', true);
+                }
+            }).catch(() => {
+                isPlaying = false;
+                updatePlayAllButton();
+            });
+        }
     }
 
     function stopPlayback() {
@@ -680,21 +726,30 @@
         if (autoRunScheduled) return;
         autoRunScheduled = true;
 
-        // Queue auto-runs sequentially in the current recordings order (not random).
-        // Each recording may contain multiple API calls and repeats; we run the next
-        // recording only after the previous completes.
         const initialDelayMs = 10000;
         setTimeout(() => {
-            enabledRecordings.forEach((rec) => {
-                enqueueExecution(async () => {
-                    // Small gap between recordings to reduce bursty traffic
-                    try {
-                        await executeRecordingInternal(rec);
-                    } finally {
-                        await new Promise(r => setTimeout(r, 2000));
-                    }
+            if (rushMode) {
+                // Rush mode: Execute all recordings simultaneously
+                enabledRecordings.forEach((rec) => {
+                    executeRecordingInternal(rec).catch(e => {
+                        console.error('Action Replay: Error during auto-run (rush mode):', e);
+                    });
                 });
-            });
+            } else {
+                // Normal mode: Queue auto-runs sequentially in the current recordings order (not random).
+                // Each recording may contain multiple API calls and repeats; we run the next
+                // recording only after the previous completes.
+                enabledRecordings.forEach((rec) => {
+                    enqueueExecution(async () => {
+                        // Small gap between recordings to reduce bursty traffic
+                        try {
+                            await executeRecordingInternal(rec);
+                        } finally {
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
+                    });
+                });
+            }
         }, initialDelayMs);
     }
 
@@ -903,6 +958,10 @@
                 <button id="export-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #4CAF50; border-radius: 5px;">💾 Export</button>
                 <button id="import-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #2196F3; border-radius: 5px;">📥 Import</button>
                 <button id="delete-all-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: #ff4444; border-radius: 5px;">🗑️ Delete All</button>
+                <label style="cursor: pointer; color: #ff4444; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="rush-mode-checkbox" ${rushMode ? 'checked' : ''} style="margin-right: 5px;">
+                    <span>⚡ Rush Mode (⚠️ CAUTION: May cause ban - runs all recordings simultaneously)</span>
+                </label>
             </div>
         `;
         
@@ -942,6 +1001,10 @@
         document.getElementById('export-btn').addEventListener('click', exportRecordings);
         document.getElementById('import-btn').addEventListener('click', importRecordings);
         document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
+        document.getElementById('rush-mode-checkbox').addEventListener('change', (e) => {
+            rushMode = e.target.checked;
+            saveSettings();
+        });
     }
 
     function populateRecordingsList() {
