@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      1.1.3
+// @version      1.1.5
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -9,8 +9,8 @@
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
 // @grant        none
 // @run-at       document-start
-// @downloadURL https://github.com/mailming/Action-Replay-HwH-Ext/raw/refs/heads/main/Action%20Replay%20HwH%20Ext.user.js
-// @updateURL https://github.com/mailming/Action-Replay-HwH-Ext/raw/refs/heads/main/Action%20Replay%20HwH%20Ext.user.js
+// @downloadURL https://update.greasyfork.org/scripts/559623/Action%20Replay%20HwH%20Ext.user.js
+// @updateURL https://update.greasyfork.org/scripts/559623/Action%20Replay%20HwH%20Ext.meta.js
 // ==/UserScript==
 
 (function() {
@@ -18,7 +18,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.1.3";
+    const EXTENSION_VERSION = "1.1.5";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---

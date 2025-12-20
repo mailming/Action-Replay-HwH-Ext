@@ -1,0 +1,165 @@
+{
+  "recordings": [
+    {
+      "id": "1763933369659_o4gofzl1s",
+      "name": "SimulateBattle",
+      "description": "Check API for simulator",
+      "createdAt": 1763933369659,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "apiCalls": [
+        {
+          "name": "demoBattles_startBattle",
+          "args": {
+            "mechanic": "arena",
+            "defenceMaxUpgrade": false,
+            "defenceTeam": {
+              "units": [
+                31,
+                58,
+                63,
+                48,
+                16
+              ]
+            },
+            "defenceFavor": {
+              "16": 6004,
+              "31": 6006,
+              "48": 6000,
+              "58": 6005,
+              "63": 6003
+            },
+            "maxUpgrade": false,
+            "team": {
+              "units": [
+                62,
+                29,
+                58,
+                40,
+                56
+              ]
+            },
+            "favor": {},
+            "defenceBuffs": {},
+            "buffs": {},
+            "parentId": 0,
+            "entryId": 0
+          },
+          "context": {
+            "actionTs": 197863
+          },
+          "ident": "body"
+        },
+        {
+          "name": "demoBattles_endBattle",
+          "args": {
+            "result": {
+              "win": false,
+              "stars": 0
+            },
+            "progress": [
+              {
+                "v": 273,
+                "b": 0,
+                "seed": 1542140043,
+                "attackers": {
+                  "input": [],
+                  "heroes": {}
+                },
+                "defenders": {
+                  "input": [],
+                  "heroes": {
+                    "1": {
+                      "hp": 326340,
+                      "energy": 300,
+                      "isDead": false
+                    },
+                    "2": {
+                      "hp": 561958,
+                      "energy": 502,
+                      "isDead": false
+                    },
+                    "3": {
+                      "hp": 426472,
+                      "energy": 1000,
+                      "isDead": false
+                    },
+                    "4": {
+                      "hp": 407102,
+                      "energy": 700,
+                      "isDead": false,
+                      "extra": {
+                        "hero48StartEnergy": 1
+                      }
+                    },
+                    "5": {
+                      "hp": 327207,
+                      "energy": 737,
+                      "isDead": false
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "context": {
+            "actionTs": 204350
+          },
+          "ident": "group_1_body"
+        }
+      ],
+      "repeatCount": 20
+    },
+    {
+      "id": "1763940295788_zntdg9r09",
+      "name": "ArenaFind",
+      "description": "Find opponents",
+      "createdAt": 1763940295788,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "apiCalls": [
+        {
+          "name": "arenaFindEnemies",
+          "args": {},
+          "context": {
+            "actionTs": 58978
+          },
+          "ident": "body"
+        }
+      ],
+      "repeatCount": 50
+    },
+    {
+      "id": "1766245122902_98hh0gc2y",
+      "name": "CheckTournamentAPI",
+      "description": "",
+      "createdAt": 1766245122902,
+      "expirationDays": 2,
+      "expiresAt": 1766417922902,
+      "autoRun": true,
+      "repeatCount": 30,
+      "apiCalls": [
+        {
+          "name": "powerTournament_getState",
+          "args": {},
+          "context": {
+            "actionTs": 268223
+          },
+          "ident": "group_1_body"
+        },
+        {
+          "name": "powerTournament_getGroupInfo",
+          "args": {},
+          "context": {
+            "actionTs": 268223
+          },
+          "ident": "group_1_powerTournament_getGroupInfo"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2025-12-20T19:58:33.659Z",
+  "version": "1.1.3"
+}
