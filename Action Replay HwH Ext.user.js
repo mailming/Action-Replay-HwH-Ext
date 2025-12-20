@@ -3,7 +3,7 @@
 // @namespace    HeroWarsHelper.ActionReplay
 // @version      1.1.3
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
-// @author       AutoHero
+// @author       zzsheep
 // @match        https://www.hero-wars.com/*
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
 // @grant        none
@@ -18,7 +18,7 @@
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
     const EXTENSION_VERSION = "1.1.3";
-    const EXTENSION_AUTHOR = "AutoHero";
+    const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
     let recordings = [];
