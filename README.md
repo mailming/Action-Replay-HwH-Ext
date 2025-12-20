@@ -1,5 +1,7 @@
 ﻿# Action Replay HwH Extension
 
+**Tired of repeating the same tasks over and over?** Simply record your actions once and replay them as many times as you want with just one click! 🚀
+
 A HeroWarsHelper (HWH) extension that **records actions you do in the game UI** and can **replay them later** (with optional auto-run and repeat counts).
 
 ## Install
