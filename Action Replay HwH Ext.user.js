@@ -39,6 +39,9 @@
     let playAllAborted = false; // Flag to abort playback
     let rushMode = false; // Rush mode: run all recordings simultaneously
     let autoCollectRewards = false; // Auto collect quest rewards on script load
+    let winterfestMode = false; // Winterfest mode
+    let winterfestGoalPlace = 50; // Goal ranking place (0-50)
+    let winterfestInterval = null; // Interval for winterfest ranking polling
     let currentlyPlayingRecordingId = null; // Track which individual recording is playing
     let recordingAborted = false; // Flag to abort individual recording execution
     
@@ -266,6 +269,13 @@
                 }
             }, 12000); // Wait 12 seconds after script load
         }
+        
+        // Start winterfest polling if enabled
+        if (winterfestMode) {
+            setTimeout(() => {
+                startWinterfestPolling();
+            }, 5000); // Wait 5 seconds after script load
+        }
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -339,17 +349,138 @@
         const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
         rushMode = settings.rushMode || false;
         autoCollectRewards = settings.autoCollectRewards || false;
+        winterfestMode = settings.winterfestMode || false;
+        winterfestGoalPlace = settings.winterfestGoalPlace !== undefined ? settings.winterfestGoalPlace : 50;
     }
 
     function saveSettings() {
         const { HWHFuncs } = window;
         HWHFuncs.setSaveVal(STORAGE_SETTINGS, {
             rushMode: rushMode,
-            autoCollectRewards: autoCollectRewards
+            autoCollectRewards: autoCollectRewards,
+            winterfestMode: winterfestMode,
+            winterfestGoalPlace: winterfestGoalPlace
         });
     }
 
     // --- RECORDING MANAGEMENT ---
+    // Helper function to get enabled recordings (reused in multiple places)
+    function getEnabledRecordings() {
+        const now = Date.now();
+        return recordings.filter(rec => {
+            if (!rec.autoRun) return false;
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
+            return true;
+        });
+    }
+    
+    // Helper function to execute recordings in rush or sequential mode
+    async function executeRecordingsBatch(enabledRecordings, options = {}) {
+        const {
+            checkAbort = null,           // Function to check if execution should abort
+            onComplete = null,           // Callback when all recordings complete
+            errorPrefix = 'Action Replay', // Prefix for error messages
+            showProgress = false,        // Whether to show progress messages
+            updateButton = false         // Whether to update play button state
+        } = options;
+        
+        if (enabledRecordings.length === 0) {
+            if (showProgress) {
+                const { HWHFuncs } = window;
+                HWHFuncs.setProgress(`${errorPrefix}: No enabled recordings to execute`, true);
+            }
+            return;
+        }
+        
+        if (showProgress) {
+            const { HWHFuncs } = window;
+            const modeText = rushMode ? 'simultaneously (RUSH MODE)' : 'sequentially';
+            HWHFuncs.setProgress(`${errorPrefix}: Executing ${enabledRecordings.length} recording(s) ${modeText}...`, true);
+        }
+        
+        if (rushMode) {
+            // Rush mode: Execute all recordings simultaneously
+            const promises = enabledRecordings.map((rec) => {
+                return (async () => {
+                    if (checkAbort && checkAbort()) return;
+                    try {
+                        await executeRecordingInternal(rec);
+                    } catch (e) {
+                        console.error(`${errorPrefix}: Error during execution (rush mode):`, e);
+                    }
+                })();
+            });
+            
+            await Promise.all(promises);
+        } else {
+            // Normal mode: Execute all enabled recordings sequentially
+            for (const rec of enabledRecordings) {
+                if (checkAbort && checkAbort()) break;
+                
+                await enqueueExecution(async () => {
+                    if (checkAbort && checkAbort()) return;
+                    try {
+                        await executeRecordingInternal(rec);
+                    } catch (e) {
+                        console.error(`${errorPrefix}: Error during execution:`, e);
+                    } finally {
+                        if (!checkAbort || !checkAbort()) {
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
+                    }
+                });
+            }
+            
+            // Wait for all executions to complete
+            await executionQueue;
+        }
+        
+        if (onComplete) {
+            onComplete();
+        }
+        
+        if (showProgress) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress(`${errorPrefix}: All recordings completed`, true);
+        }
+    }
+    
+    // Generic helper to get game values from various sources
+    function getGameValue(key, defaultValue = null, stringify = false) {
+        // Define key variations based on common naming patterns
+        const keyVariations = {
+            'serverId': ['serverId', 'server_id', 'server'],
+            'userId': ['userId', 'user_id', 'playerId']
+        };
+        
+        const variations = keyVariations[key] || [key, key.toLowerCase()];
+        
+        // Try HWH storage
+        if (window.HWHFuncs && window.HWHFuncs.getSaveVal) {
+            for (const variation of variations) {
+                const value = window.HWHFuncs.getSaveVal(variation);
+                if (value !== undefined && value !== null) {
+                    return stringify ? String(value) : value;
+                }
+            }
+        }
+        
+        // Try game state
+        if (window.game && window.game[key]) {
+            return stringify ? String(window.game[key]) : window.game[key];
+        }
+        
+        // Try HWH classes
+        if (window.HWHClasses && window.HWHClasses.GameData) {
+            const gameData = window.HWHClasses.GameData.getInst();
+            if (gameData && gameData[key]) {
+                return stringify ? String(gameData[key]) : gameData[key];
+            }
+        }
+        
+        return defaultValue;
+    }
+    
     function toggleRecording() {
         if (isRecording) {
             stopRecording();
@@ -501,12 +632,7 @@
     }
 
     function playAllRecordings() {
-        const now = Date.now();
-        const enabledRecordings = recordings.filter(rec => {
-            if (!rec.autoRun) return false;
-            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
-            return true;
-        });
+        const enabledRecordings = getEnabledRecordings();
 
         if (enabledRecordings.length === 0) {
             const { HWHFuncs } = window;
@@ -518,67 +644,19 @@
         playAllAborted = false;
         updatePlayAllButton();
 
-        const { HWHFuncs } = window;
-        const modeText = rushMode ? 'simultaneously (RUSH MODE)' : 'sequentially';
-        HWHFuncs.setProgress(`Action Replay: Playing all ${enabledRecordings.length} enabled recording(s) ${modeText}...`, true);
-
-        if (rushMode) {
-            // Rush mode: Execute all recordings simultaneously
-            const promises = enabledRecordings.map((rec) => {
-                return (async () => {
-                    if (playAllAborted) {
-                        return;
-                    }
-                    try {
-                        await executeRecordingInternal(rec);
-                    } catch (e) {
-                        console.error('Action Replay: Error during play all (rush mode):', e);
-                    }
-                })();
-            });
-            
-            // Wait for all executions to complete
-            Promise.all(promises).then(() => {
+        executeRecordingsBatch(enabledRecordings, {
+            checkAbort: () => playAllAborted,
+            onComplete: () => {
                 isPlaying = false;
                 updatePlayAllButton();
-                if (!playAllAborted) {
-                    HWHFuncs.setProgress('Action Replay: All recordings completed', true);
-                }
-            }).catch(() => {
-                isPlaying = false;
-                updatePlayAllButton();
-            });
-        } else {
-            // Normal mode: Execute all enabled recordings sequentially
-            enabledRecordings.forEach((rec) => {
-                enqueueExecution(async () => {
-                    if (playAllAborted) {
-                        return;
-                    }
-                    try {
-                        await executeRecordingInternal(rec);
-                    } catch (e) {
-                        console.error('Action Replay: Error during play all:', e);
-                    } finally {
-                        if (!playAllAborted) {
-                            await new Promise(r => setTimeout(r, 2000));
-                        }
-                    }
-                });
-            });
-
-            // Wait for all executions to complete, then update button
-            executionQueue.then(() => {
-                isPlaying = false;
-                updatePlayAllButton();
-                if (!playAllAborted) {
-                    HWHFuncs.setProgress('Action Replay: All recordings completed', true);
-                }
-            }).catch(() => {
-                isPlaying = false;
-                updatePlayAllButton();
-            });
-        }
+            },
+            errorPrefix: 'Action Replay',
+            showProgress: true,
+            updateButton: true
+        }).catch(() => {
+            isPlaying = false;
+            updatePlayAllButton();
+        });
     }
 
     function stopPlayback() {
@@ -785,12 +863,7 @@
     }
 
     function scheduleAutoRuns() {
-        const now = Date.now();
-        const enabledRecordings = recordings.filter(rec => {
-            if (!rec.autoRun) return false;
-            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
-            return true;
-        });
+        const enabledRecordings = getEnabledRecordings();
 
         if (enabledRecordings.length === 0) return;
         if (autoRunScheduled) return;
@@ -798,28 +871,10 @@
 
         const initialDelayMs = 10000;
         setTimeout(() => {
-            if (rushMode) {
-                // Rush mode: Execute all recordings simultaneously
-                enabledRecordings.forEach((rec) => {
-                    executeRecordingInternal(rec).catch(e => {
-                        console.error('Action Replay: Error during auto-run (rush mode):', e);
-                    });
-                });
-            } else {
-                // Normal mode: Queue auto-runs sequentially in the current recordings order (not random).
-                // Each recording may contain multiple API calls and repeats; we run the next
-                // recording only after the previous completes.
-                enabledRecordings.forEach((rec) => {
-                    enqueueExecution(async () => {
-                        // Small gap between recordings to reduce bursty traffic
-                        try {
-                            await executeRecordingInternal(rec);
-                        } finally {
-                            await new Promise(r => setTimeout(r, 2000));
-                        }
-                    });
-                });
-            }
+            executeRecordingsBatch(enabledRecordings, {
+                errorPrefix: 'Action Replay',
+                showProgress: false
+            });
         }, initialDelayMs);
     }
 
@@ -1007,6 +1062,177 @@
             const { HWHFuncs } = window;
             HWHFuncs.setProgress('Action Replay: Error collecting quest rewards', true);
             return 0;
+        }
+    }
+
+    // --- WINTERFEST RANKING POLLING ---
+    function getServerId() {
+        return getGameValue('serverId', 218);
+    }
+    
+    function getCurrentUserId() {
+        return getGameValue('userId', null, true);
+    }
+    
+    async function fetchWinterfestRanking() {
+        try {
+            const { Send, HWHFuncs } = window;
+            const serverId = getServerId();
+            const currentUserId = getCurrentUserId();
+            
+            // Call topGet API with giftsSend type (as per documentation)
+            const callToExecute = {
+                name: 'topGet',
+                args: {
+                    type: 'giftsSend',
+                    extraId: 0,
+                    serverId: serverId
+                },
+                context: {
+                    actionTs: Math.floor(performance.now())
+                },
+                ident: 'body'
+            };
+            
+            const response = await Send({ calls: [callToExecute] });
+            
+            // Process response
+            if (response && response.results && response.results.length > 0) {
+                const result = response.results[0];
+                if (result.result && result.result.response) {
+                    const responseData = result.result.response;
+                    const top = responseData.top || [];
+                    const myPlace = responseData.place || null;
+                    const myGiftsSum = responseData.giftsSum || null;
+                    
+                    // Find my userId from the ranking if not found in context
+                    let myUserId = currentUserId;
+                    if (!myUserId && myPlace && top.length > 0) {
+                        // Try to find userId at my place (place is 1-based, array is 0-based)
+                        const myIndex = myPlace - 1;
+                        if (myIndex >= 0 && myIndex < top.length) {
+                            const entryAtMyPlace = top[myIndex];
+                            // Verify it matches my giftsSum if available
+                            if (!myGiftsSum || entryAtMyPlace.giftsSum === myGiftsSum) {
+                                myUserId = entryAtMyPlace.userId;
+                            }
+                        }
+                    }
+                    
+                    // If goal is 0, only output 1st place and my userId
+                    if (winterfestGoalPlace === 0) {
+                        if (top.length > 0) {
+                            const firstPlace = top[0];
+                            console.log(`Action Replay: Winterfest Ranking - 1st Place: User ${firstPlace.userId}, GiftsSum: ${firstPlace.giftsSum}`);
+                            if (myUserId) {
+                                if (myPlace && myGiftsSum) {
+                                    console.log(`Action Replay: Winterfest Ranking - My Ranking: Place ${myPlace}, UserID: ${myUserId}, GiftsSum: ${myGiftsSum}`);
+                                } else {
+                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                                }
+                            }
+                        }
+                    } else {
+                        // Goal is set, output goal place, my ranking, and difference
+                        const goalIndex = winterfestGoalPlace - 1; // Convert to 0-based index
+                        
+                        if (goalIndex >= 0 && goalIndex < top.length) {
+                            const goalEntry = top[goalIndex];
+                            const goalGiftsSum = parseInt(goalEntry.giftsSum) || 0;
+                            
+                            console.log(`Action Replay: Winterfest Ranking - Goal Place ${winterfestGoalPlace}: User ${goalEntry.userId}, GiftsSum: ${goalEntry.giftsSum}`);
+                            
+                            if (myUserId && myPlace && myGiftsSum) {
+                                const myGiftsSumNum = parseInt(myGiftsSum) || 0;
+                                const difference = myGiftsSumNum - goalGiftsSum;
+                                
+                                console.log(`Action Replay: Winterfest Ranking - My Ranking: Place ${myPlace}, UserID: ${myUserId}, GiftsSum: ${myGiftsSum}`);
+                                console.log(`Action Replay: Winterfest Ranking - Difference: ${difference > 0 ? '+' : ''}${difference} (My GiftsSum - Goal Place GiftsSum)`);
+                                
+                                // Check if my place is lower (worse) than goal place (higher number = worse rank)
+                                if (myPlace > winterfestGoalPlace) {
+                                    console.log(`Action Replay: Winterfest Ranking - My place (${myPlace}) is lower than goal (${winterfestGoalPlace}), executing recordings...`);
+                                    await executeAllRecordingsForWinterfest();
+                                }
+                            } else if (myUserId) {
+                                console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                            }
+                        } else {
+                            console.log(`Action Replay: Winterfest Ranking - Goal place ${winterfestGoalPlace} is out of range (max: ${top.length})`);
+                            if (myUserId) {
+                                if (myPlace && myGiftsSum) {
+                                    console.log(`Action Replay: Winterfest Ranking - My Ranking: Place ${myPlace}, UserID: ${myUserId}, GiftsSum: ${myGiftsSum}`);
+                                    // Check if my place is lower (worse) than goal place
+                                    if (myPlace > winterfestGoalPlace) {
+                                        console.log(`Action Replay: Winterfest Ranking - My place (${myPlace}) is lower than goal (${winterfestGoalPlace}), executing recordings...`);
+                                        await executeAllRecordingsForWinterfest();
+                                    }
+                                } else {
+                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Action Replay: Error fetching winterfest ranking:', error);
+        }
+    }
+    
+    async function executeAllRecordingsForWinterfest() {
+        const enabledRecordings = getEnabledRecordings();
+
+        if (enabledRecordings.length === 0) {
+            console.log('Action Replay: Winterfest - No enabled recordings to execute');
+            return;
+        }
+
+        console.log(`Action Replay: Winterfest - Executing ${enabledRecordings.length} enabled recording(s)...`);
+        
+        await executeRecordingsBatch(enabledRecordings, {
+            errorPrefix: 'Action Replay: Winterfest',
+            showProgress: true
+        });
+        
+        console.log('Action Replay: Winterfest - All recordings completed, resuming ranking check...');
+    }
+    
+    async function runWinterfestPollingCycle() {
+        if (!winterfestMode) {
+            stopWinterfestPolling();
+            return;
+        }
+        
+        try {
+            // Fetch ranking and execute recordings if needed (this will wait for completion)
+            await fetchWinterfestRanking();
+        } catch (error) {
+            console.error('Action Replay: Error in winterfest polling cycle:', error);
+        }
+        
+        // Schedule next check only after current one completes (including recording execution)
+        if (winterfestMode) {
+            winterfestInterval = setTimeout(() => {
+                runWinterfestPollingCycle();
+            }, 3000);
+        }
+    }
+    
+    function startWinterfestPolling() {
+        // Clear any existing timeout/interval
+        if (winterfestInterval) {
+            clearTimeout(winterfestInterval);
+        }
+        
+        // Start the polling cycle (will recursively schedule itself)
+        runWinterfestPollingCycle();
+    }
+    
+    function stopWinterfestPolling() {
+        if (winterfestInterval) {
+            clearTimeout(winterfestInterval);
+            winterfestInterval = null;
         }
     }
 
@@ -1200,6 +1426,17 @@
         popup.innerHTML = `
             <button class="api-repeater-close-btn">&times;</button>
             <h2>Action Replay <span style="background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.6em; font-weight: bold; margin-left: 10px; text-transform: uppercase; letter-spacing: 1px;">🏆 Tournament</span></h2>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac;">
+                    <input type="checkbox" id="winterfest-mode-checkbox" ${winterfestMode ? 'checked' : ''} style="margin-right: 5px;">
+                    <span>❄️ Winterfest Mode</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; color: #fce1ac;">
+                    <span>Goal:</span>
+                    <input type="number" id="winterfest-goal-place-input" min="0" max="50" value="${winterfestGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
+                    <span>place</span>
+                </label>
+            </div>
             <div class="api-repeater-controls">
                 <button id="start-recording-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: ${isRecording ? '#ff4444' : '#4CAF50'}; border-radius: 5px;">
                     ${isRecording ? '⏹ Stop Recording' : '⏺ Start Recording'}
@@ -1269,6 +1506,23 @@
         });
         document.getElementById('auto-collect-rewards-checkbox').addEventListener('change', (e) => {
             autoCollectRewards = e.target.checked;
+            saveSettings();
+        });
+        document.getElementById('winterfest-mode-checkbox').addEventListener('change', (e) => {
+            winterfestMode = e.target.checked;
+            saveSettings();
+            if (winterfestMode) {
+                startWinterfestPolling();
+            } else {
+                stopWinterfestPolling();
+            }
+        });
+        document.getElementById('winterfest-goal-place-input').addEventListener('change', (e) => {
+            let value = parseInt(e.target.value) || 0;
+            if (value < 0) value = 0;
+            if (value > 50) value = 50;
+            winterfestGoalPlace = value;
+            e.target.value = value;
             saveSettings();
         });
     }
