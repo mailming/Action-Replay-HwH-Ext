@@ -1,0 +1,1546 @@
+{
+  "recordings": [
+    {
+      "id": "1766273704064_rr6ityh2d",
+      "name": "Aurora-GOE-up1",
+      "description": "LevelUp Aurora GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 1
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704065_rr6ityh2d",
+      "name": "Galahad-GOE-up1",
+      "description": "LevelUp Galahad GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 2
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704066_rr6ityh2d",
+      "name": "Keira-GOE-up1",
+      "description": "LevelUp Keira GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 3
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704067_rr6ityh2d",
+      "name": "Astaroth-GOE-up1",
+      "description": "LevelUp Astaroth GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 4
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704068_rr6ityh2d",
+      "name": "Kai-GOE-up1",
+      "description": "LevelUp Kai GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 5
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704069_rr6ityh2d",
+      "name": "Phobos-GOE-up1",
+      "description": "LevelUp Phobos GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 6
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704070_rr6ityh2d",
+      "name": "Thea-GOE-up1",
+      "description": "LevelUp Thea GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 7
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704071_rr6ityh2d",
+      "name": "Daredevil-GOE-up1",
+      "description": "LevelUp Daredevil GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 8
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704072_rr6ityh2d",
+      "name": "Heidi-GOE-up1",
+      "description": "LevelUp Heidi GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 9
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704073_rr6ityh2d",
+      "name": "Faceless-GOE-up1",
+      "description": "LevelUp Faceless GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 10
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704074_rr6ityh2d",
+      "name": "Chabba-GOE-up1",
+      "description": "LevelUp Chabba GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 11
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704075_rr6ityh2d",
+      "name": "Arachne-GOE-up1",
+      "description": "LevelUp Arachne GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 12
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704076_rr6ityh2d",
+      "name": "Orion-GOE-up1",
+      "description": "LevelUp Orion GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 13
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704077_rr6ityh2d",
+      "name": "Fox-GOE-up1",
+      "description": "LevelUp Fox GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 14
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704078_rr6ityh2d",
+      "name": "Ginger-GOE-up1",
+      "description": "LevelUp Ginger GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 15
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704079_rr6ityh2d",
+      "name": "Dante-GOE-up1",
+      "description": "LevelUp Dante GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 16
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704080_rr6ityh2d",
+      "name": "Mojo-GOE-up1",
+      "description": "LevelUp Mojo GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 17
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704081_rr6ityh2d",
+      "name": "Judge-GOE-up1",
+      "description": "LevelUp Judge GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 18
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704082_rr6ityh2d",
+      "name": "Dark-Star-GOE-up1",
+      "description": "LevelUp Dark Star GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 19
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704083_rr6ityh2d",
+      "name": "Artemis-GOE-up1",
+      "description": "LevelUp Artemis GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 20
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704084_rr6ityh2d",
+      "name": "Markus-GOE-up1",
+      "description": "LevelUp Markus GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 21
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704085_rr6ityh2d",
+      "name": "Peppy-GOE-up1",
+      "description": "LevelUp Peppy GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 22
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704086_rr6ityh2d",
+      "name": "Lian-GOE-up1",
+      "description": "LevelUp Lian GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 23
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704087_rr6ityh2d",
+      "name": "Cleaver-GOE-up1",
+      "description": "LevelUp Cleaver GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 24
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704088_rr6ityh2d",
+      "name": "Ishmael-GOE-up1",
+      "description": "LevelUp Ishmael GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 25
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704089_rr6ityh2d",
+      "name": "Lilith-GOE-up1",
+      "description": "LevelUp Lilith GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 26
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704090_rr6ityh2d",
+      "name": "Luther-GOE-up1",
+      "description": "LevelUp Luther GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 27
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704091_rr6ityh2d",
+      "name": "Qing-Mao-GOE-up1",
+      "description": "LevelUp Qing Mao GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 28
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704092_rr6ityh2d",
+      "name": "Dorian-GOE-up1",
+      "description": "LevelUp Dorian GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 29
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704093_rr6ityh2d",
+      "name": "Cornelius-GOE-up1",
+      "description": "LevelUp Cornelius GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 30
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704094_rr6ityh2d",
+      "name": "Jet-GOE-up1",
+      "description": "LevelUp Jet GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 31
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704095_rr6ityh2d",
+      "name": "Helios-GOE-up1",
+      "description": "LevelUp Helios GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 32
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704096_rr6ityh2d",
+      "name": "Lars-GOE-up1",
+      "description": "LevelUp Lars GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 33
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704097_rr6ityh2d",
+      "name": "Krista-GOE-up1",
+      "description": "LevelUp Krista GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 34
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704098_rr6ityh2d",
+      "name": "Jorgen-GOE-up1",
+      "description": "LevelUp Jorgen GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 35
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704099_rr6ityh2d",
+      "name": "Maya-GOE-up1",
+      "description": "LevelUp Maya GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 36
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704100_rr6ityh2d",
+      "name": "Jhu-GOE-up1",
+      "description": "LevelUp Jhu GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 37
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704101_rr6ityh2d",
+      "name": "Elmir-GOE-up1",
+      "description": "LevelUp Elmir GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 38
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704102_rr6ityh2d",
+      "name": "Ziri-GOE-up1",
+      "description": "LevelUp Ziri GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 39
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704103_rr6ityh2d",
+      "name": "Nebula-GOE-up1",
+      "description": "LevelUp Nebula GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 40
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704104_rr6ityh2d",
+      "name": "Karkh-GOE-up1",
+      "description": "LevelUp Karkh GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 41
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704105_rr6ityh2d",
+      "name": "Rufus-GOE-up1",
+      "description": "LevelUp Rufus GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 42
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704106_rr6ityh2d",
+      "name": "Celeste-GOE-up1",
+      "description": "LevelUp Celeste GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 43
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704107_rr6ityh2d",
+      "name": "Astrid-and-Lucas-GOE-up1",
+      "description": "LevelUp Astrid and Lucas GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 44
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704108_rr6ityh2d",
+      "name": "Satori-GOE-up1",
+      "description": "LevelUp Satori GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 45
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704109_rr6ityh2d",
+      "name": "Martha-GOE-up1",
+      "description": "LevelUp Martha GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 46
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704110_rr6ityh2d",
+      "name": "Andvari-GOE-up1",
+      "description": "LevelUp Andvari GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 47
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704111_rr6ityh2d",
+      "name": "Sebastian-GOE-up1",
+      "description": "LevelUp Sebastian GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 48
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704112_rr6ityh2d",
+      "name": "Yasmine-GOE-up1",
+      "description": "LevelUp Yasmine GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 49
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704113_rr6ityh2d",
+      "name": "Corvus-GOE-up1",
+      "description": "LevelUp Corvus GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 50
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704114_rr6ityh2d",
+      "name": "Morrigan-GOE-up1",
+      "description": "LevelUp Morrigan GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 51
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704115_rr6ityh2d",
+      "name": "Isaac-GOE-up1",
+      "description": "LevelUp Isaac GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 52
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704116_rr6ityh2d",
+      "name": "Alvanor-GOE-up1",
+      "description": "LevelUp Alvanor GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 53
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704117_rr6ityh2d",
+      "name": "Tristan-GOE-up1",
+      "description": "LevelUp Tristan GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 54
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704118_rr6ityh2d",
+      "name": "Iris-GOE-up1",
+      "description": "LevelUp Iris GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 55
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704119_rr6ityh2d",
+      "name": "Amira-GOE-up1",
+      "description": "LevelUp Amira GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 56
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704120_rr6ityh2d",
+      "name": "Fafnir-GOE-up1",
+      "description": "LevelUp Fafnir GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 57
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704121_rr6ityh2d",
+      "name": "Aidan-GOE-up1",
+      "description": "LevelUp Aidan GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 58
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704122_rr6ityh2d",
+      "name": "Kayla-GOE-up1",
+      "description": "LevelUp Kayla GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 59
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704123_rr6ityh2d",
+      "name": "Mushy-and-Shroom-GOE-up1",
+      "description": "LevelUp Mushy and Shroom GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 60
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704124_rr6ityh2d",
+      "name": "Julius-GOE-up1",
+      "description": "LevelUp Julius GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 61
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704125_rr6ityh2d",
+      "name": "Polaris-GOE-up1",
+      "description": "LevelUp Polaris GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 62
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704126_rr6ityh2d",
+      "name": "Lara-Croft-GOE-up1",
+      "description": "LevelUp Lara Croft GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 63
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704127_rr6ityh2d",
+      "name": "Augustus-GOE-up1",
+      "description": "LevelUp Augustus GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 64
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704128_rr6ityh2d",
+      "name": "Ninja-Turtles-GOE-up1",
+      "description": "LevelUp Ninja Turtles GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 65
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704129_rr6ityh2d",
+      "name": "Folio-GOE-up1",
+      "description": "LevelUp Folio GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 66
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704130_rr6ityh2d",
+      "name": "Lyria-GOE-up1",
+      "description": "LevelUp Lyria GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 67
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704131_rr6ityh2d",
+      "name": "Guus-GOE-up1",
+      "description": "LevelUp Guus GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 68
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704132_rr6ityh2d",
+      "name": "Cascade-GOE-up1",
+      "description": "LevelUp Cascade GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 69
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766273704133_rr6ityh2d",
+      "name": "Electra-von-Grave-GOE-up1",
+      "description": "LevelUp Electra von Grave GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 70
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2025-12-20T23:35:23.553Z",
+  "version": "1.1.5"
+}

@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      1.1.5
+// @version      1.1.6
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -18,7 +18,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.1.5";
+    const EXTENSION_VERSION = "1.1.6";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -39,6 +39,8 @@
     let playAllAborted = false; // Flag to abort playback
     let rushMode = false; // Rush mode: run all recordings simultaneously
     let autoCollectRewards = false; // Auto collect quest rewards on script load
+    let currentlyPlayingRecordingId = null; // Track which individual recording is playing
+    let recordingAborted = false; // Flag to abort individual recording execution
     
     // Quest collection constants
     const QUEST_COLLECTION_MAX_ITERATIONS = 50;
@@ -602,8 +604,56 @@
 
     // --- EXECUTION SYSTEM ---
     async function executeRecording(recording) {
+        // If this recording is already playing, stop it
+        if (currentlyPlayingRecordingId === recording.id) {
+            stopRecordingExecution(recording.id);
+            return;
+        }
+        
+        // Set as currently playing
+        currentlyPlayingRecordingId = recording.id;
+        recordingAborted = false;
+        updateRecordingButtonState(recording.id, true);
+        
         // Always serialize to avoid parallel execution (server risk)
-        return enqueueExecution(() => executeRecordingInternal(recording));
+        return enqueueExecution(() => executeRecordingInternal(recording)).then(() => {
+            // Reset state when done
+            if (currentlyPlayingRecordingId === recording.id) {
+                currentlyPlayingRecordingId = null;
+                recordingAborted = false;
+                updateRecordingButtonState(recording.id, false);
+            }
+        }).catch(() => {
+            // Reset state on error
+            if (currentlyPlayingRecordingId === recording.id) {
+                currentlyPlayingRecordingId = null;
+                recordingAborted = false;
+                updateRecordingButtonState(recording.id, false);
+            }
+        });
+    }
+    
+    function stopRecordingExecution(recordingId) {
+        if (currentlyPlayingRecordingId === recordingId) {
+            recordingAborted = true;
+            currentlyPlayingRecordingId = null;
+            updateRecordingButtonState(recordingId, false);
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('Action Replay: Recording execution stopped', true);
+        }
+    }
+    
+    function updateRecordingButtonState(recordingId, isPlaying) {
+        const button = document.querySelector(`[data-action="run"][data-id="${recordingId}"]`);
+        if (button) {
+            if (isPlaying) {
+                button.textContent = '⏹';
+                button.title = 'Stop execution';
+            } else {
+                button.textContent = '▶️';
+                button.title = 'Replay';
+            }
+        }
     }
 
     async function executeRecordingInternal(recording) {
@@ -625,8 +675,8 @@
         
         // Execute the recording repeatCount times
         for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex++) {
-            // Check for abort
-            if (playAllAborted) {
+            // Check for abort (both play all and individual recording)
+            if (playAllAborted || recordingAborted) {
                 HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
                 return;
             }
@@ -641,8 +691,8 @@
             
             // Execute API calls one by one to avoid duplicate ident errors
             for (let i = 0; i < recording.apiCalls.length; i++) {
-                // Check for abort before each API call
-                if (playAllAborted) {
+                // Check for abort before each API call (both play all and individual recording)
+                if (playAllAborted || recordingAborted) {
                     HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
                     return;
                 }
@@ -697,8 +747,8 @@
                 // Add delay between calls (similar to Auto Daily Extension)
                 if (i < recording.apiCalls.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
-                    // Check for abort after delay
-                    if (playAllAborted) {
+                    // Check for abort after delay (both play all and individual recording)
+                    if (playAllAborted || recordingAborted) {
                         HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
                         return;
                     }
@@ -712,8 +762,8 @@
             // Add delay between repeats (if more than one repeat)
             if (repeatIndex < repeatCount - 1) {
                 await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between repeats
-                // Check for abort after delay
-                if (playAllAborted) {
+                // Check for abort after delay (both play all and individual recording)
+                if (playAllAborted || recordingAborted) {
                     HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);
                     return;
                 }
@@ -1317,7 +1367,7 @@
                 </div>
                 <div class="api-repeater-recording-actions">
                     <input type="number" class="api-repeater-repeat-count" min="1" value="${recording.repeatCount || 1}" data-action="update-repeat-count" data-id="${recording.id}" title="Number of times to repeat">
-                    <button class="api-repeater-btn api-repeater-btn-success" title="Replay" data-action="run" data-id="${recording.id}">▶️</button>
+                    <button class="api-repeater-btn api-repeater-btn-success" title="${currentlyPlayingRecordingId === recording.id ? 'Stop execution' : 'Replay'}" data-action="run" data-id="${recording.id}">${currentlyPlayingRecordingId === recording.id ? '⏹' : '▶️'}</button>
                     <label style="cursor: pointer;">
                         <input type="checkbox" ${recording.autoRun ? 'checked' : ''} data-action="toggle-autorun" data-id="${recording.id}" style="margin-right: 5px;">
                         <span style="font-size: 0.9em;">Auto</span>

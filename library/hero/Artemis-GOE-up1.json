@@ -1,0 +1,28 @@
+{
+  "recordings": [
+    {
+      "id": "1766273704083_rr6ityh2d",
+      "name": "Artemis-GOE-up1",
+      "description": "LevelUp Artemis GOE by 1",
+      "createdAt": 1766273704063,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": true,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "heroTitanGiftLevelUp",
+          "args": {
+            "heroId": 20
+          },
+          "context": {
+            "actionTs": 28612
+          },
+          "ident": "body"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2025-12-20T23:35:23.553Z",
+  "version": "1.1.5"
+}
