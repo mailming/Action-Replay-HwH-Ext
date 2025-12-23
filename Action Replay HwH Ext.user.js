@@ -1128,7 +1128,7 @@
                                 if (myPlace && myGiftsSum) {
                                     console.log(`Action Replay: Winterfest Ranking - My Ranking: Place ${myPlace}, UserID: ${myUserId}, GiftsSum: ${myGiftsSum}`);
                                 } else {
-                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked - tool requires you to be ranked to work correctly)`);
                                 }
                             }
                         }
@@ -1155,7 +1155,7 @@
                                     await executeAllRecordingsForWinterfest();
                                 }
                             } else if (myUserId) {
-                                console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                                console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked - tool requires you to be ranked to work correctly)`);
                             }
                         } else {
                             console.log(`Action Replay: Winterfest Ranking - Goal place ${winterfestGoalPlace} is out of range (max: ${top.length})`);
@@ -1163,12 +1163,13 @@
                                 if (myPlace && myGiftsSum) {
                                     console.log(`Action Replay: Winterfest Ranking - My Ranking: Place ${myPlace}, UserID: ${myUserId}, GiftsSum: ${myGiftsSum}`);
                                     // Check if my place is lower (worse) than goal place
+                                    // Note: User must be ranked (have a place) for this to work
                                     if (myPlace > winterfestGoalPlace) {
                                         console.log(`Action Replay: Winterfest Ranking - My place (${myPlace}) is lower than goal (${winterfestGoalPlace}), executing recordings...`);
                                         await executeAllRecordingsForWinterfest();
                                     }
                                 } else {
-                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked)`);
+                                    console.log(`Action Replay: Winterfest Ranking - My UserID: ${myUserId} (not ranked - tool requires you to be ranked to work correctly)`);
                                 }
                             }
                         }
@@ -1181,16 +1182,22 @@
     }
     
     async function executeAllRecordingsForWinterfest() {
-        const enabledRecordings = getEnabledRecordings();
+        // Get all recordings (not just autoRun ones) but filter out expired ones
+        const now = Date.now();
+        const allRecordings = recordings.filter(rec => {
+            // Skip expired recordings
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
+            return true;
+        });
 
-        if (enabledRecordings.length === 0) {
-            console.log('Action Replay: Winterfest - No enabled recordings to execute');
+        if (allRecordings.length === 0) {
+            console.log('Action Replay: Winterfest - No recordings to execute');
             return;
         }
 
-        console.log(`Action Replay: Winterfest - Executing ${enabledRecordings.length} enabled recording(s)...`);
+        console.log(`Action Replay: Winterfest - Executing ${allRecordings.length} recording(s)...`);
         
-        await executeRecordingsBatch(enabledRecordings, {
+        await executeRecordingsBatch(allRecordings, {
             errorPrefix: 'Action Replay: Winterfest',
             showProgress: true
         });
