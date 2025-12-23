@@ -1,5 +1,9 @@
 # Winterfest Tournament Guide - Using Action Replay Extension
 
+## Prerequisites
+
+⚠️ **REQUIRED**: This extension requires **[HeroWarsHelper](https://greasyfork.org/en/scripts/450693-herowarshelper)** to function. Please install HeroWarsHelper first before using Action Replay extension.
+
 ## Overview
 
 The Action Replay extension includes a powerful **Winterfest Mode** feature that automatically monitors your ranking position and executes recordings to help you maintain or improve your position in the Winterfest tournament leaderboard.
@@ -34,7 +38,7 @@ The Action Replay extension includes a powerful **Winterfest Mode** feature that
 
 **Example Settings:**
 
-![Winterfest Settings Example](../WinterFestSettings.png)
+![Winterfest Settings Example](library/WinterFestSettings.png)
 
 *In this example: Winterfest Mode is enabled, Goal is set to 21, and there is one recording saved ("SendGifttoSKE")*
 
