@@ -824,7 +824,7 @@
                 
                 // Add delay between calls (similar to Auto Daily Extension)
                 if (i < recording.apiCalls.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 0.5 second delay
                     // Check for abort after delay (both play all and individual recording)
                     if (playAllAborted || recordingAborted) {
                         HWHFuncs.setProgress(`Action Replay: ${recording.name} - Playback interrupted`, true);

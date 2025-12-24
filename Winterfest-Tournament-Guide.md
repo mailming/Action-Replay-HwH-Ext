@@ -186,7 +186,51 @@ Action Replay: Winterfest Ranking - My UserID: 67890 (not ranked - tool requires
 
 ## Advanced Tips
 
-### 1. Multiple Recording Sets
+### 1. Final Day / Last Hours Strategy
+
+**Before using the tool on the last day and last several hours of the tournament:**
+
+1. **Drain out all your holiday candies** - Use up all your holiday candy (coin type 16) before the tournament ends
+2. **Create efficient recordings** to maximize gift sending:
+   
+   **Option A: 100 Emeralds Strategy**
+   - Record actions to burn 100 emeralds 2 times
+   - Send 1 gift worth 1000 candy (which equals 4 points)
+   - This uses 200 emeralds total for 4 gift points
+   - **Note**: 1000 candy gift = 4 points
+   - **Template Available**: Import the ready-to-use template from `library/tournament/Winterfest/winterfest_option_a.json`
+     - This template includes:
+       - "DecorTreeadd500Candi" (decorates tree 2 times with `repeatCount: 2` to get 1000 candy total - 500 candy per decoration)
+       - "SendGifttoSKE" (sends 1000 candy gift with `giftNum: 1`)
+     - **Note**: You may need to update the `userId` in "SendGifttoSKE" to match your recipient
+   
+   **Option B: 2000 Gift Strategy**
+   - Record actions to burn emeralds 4 times
+   - Send out 2000 candy gifts each time (which equals 8 points per gift)
+   - This maximizes gift points per emerald spent
+   - **Note**: 2000 candy gift = 8 points
+   
+   **Option C: 5000 Gift Strategy**
+   - Record actions to burn emeralds 10 needed
+   - Send out 5000 candy gifts (which equals 20 points per gift)
+   - Higher point value per gift
+   - **Note**: 5000 candy gift = 20 points
+   
+   **Option D: 20000 Gift Strategy**
+   - Record actions to burn emeralds 40 needed
+   - Send out 20000 candy gifts (which equals 80 points per gift)
+   - Maximum point value per gift
+   - **Note**: 20000 candy gift = 80 points
+
+3. **Enable Winterfest Mode** with your recordings to automatically execute these actions
+4. **Monitor closely** during the final hours to ensure all candies are used
+
+**Why this works:**
+- Holiday candy expires at the end of the tournament, so it's better to use it all
+- Using emeralds to send larger gifts can be more efficient than using candy alone
+- Automated execution ensures you don't miss using your resources before time runs out
+
+### 2. Multiple Recording Sets
 
 Create different recording sets for different times:
 - Morning recordings (when you have more resources)
@@ -236,10 +280,11 @@ Create different recording sets for different times:
 4. Continue monitoring
 
 ### Final Days: Competition
-1. Lower goal place to target position
-2. Ensure all recordings are working
-3. Monitor closely during final hours
-4. Adjust goal as needed to maintain position
+1. **Use Final Day Strategy** (see Advanced Tips section): Drain all holiday candies using efficient emerald-to-gift recordings
+2. Lower goal place to target position
+3. Ensure all recordings are working
+4. Monitor closely during final hours
+5. Adjust goal as needed to maintain position
 
 ## Console Output Reference
 

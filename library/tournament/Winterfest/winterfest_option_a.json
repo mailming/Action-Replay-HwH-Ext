@@ -1,0 +1,56 @@
+{
+  "recordings": [
+    {
+      "id": "1766538799277_eyl4ekuxf",
+      "name": "DecorTreeadd500Candi",
+      "description": "",
+      "createdAt": 1766538799277,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 2,
+      "apiCalls": [
+        {
+          "name": "newYear_decorateTree",
+          "args": {
+            "optionId": 2,
+            "amount": 1
+          },
+          "context": {
+            "actionTs": 2954578
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1766519521814_cen16h1yd",
+      "name": "SendGifttoSKE",
+      "description": "",
+      "createdAt": 1766519521814,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "newYear_giftSend",
+          "args": {
+            "userId": "35891708",
+            "amount": 1,
+            "giftNum": 1,
+            "users": {
+              "35891708": 1
+            }
+          },
+          "context": {
+            "actionTs": 715925
+          },
+          "ident": "body"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2025-12-24T01:44:08.565Z",
+  "version": "1.1.6"
+}
