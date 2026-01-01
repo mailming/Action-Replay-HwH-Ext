@@ -42,6 +42,9 @@
     let winterfestMode = false; // Winterfest mode
     let winterfestGoalPlace = 50; // Goal ranking place (0-50)
     let winterfestInterval = null; // Interval for winterfest ranking polling
+    let heroTournamentMode = false; // Hero Tournament mode
+    let heroTournamentGoalPlace = 15; // Goal ranking place (0-50)
+    let heroTournamentInterval = null; // Interval for hero tournament ranking polling
     let currentlyPlayingRecordingId = null; // Track which individual recording is playing
     let recordingAborted = false; // Flag to abort individual recording execution
     
@@ -276,6 +279,13 @@
                 startWinterfestPolling();
             }, 5000); // Wait 5 seconds after script load
         }
+        
+        // Start hero tournament polling if enabled
+        if (heroTournamentMode) {
+            setTimeout(() => {
+                startHeroTournamentPolling();
+            }, 5000); // Wait 5 seconds after script load
+        }
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -351,6 +361,8 @@
         autoCollectRewards = settings.autoCollectRewards || false;
         winterfestMode = settings.winterfestMode || false;
         winterfestGoalPlace = settings.winterfestGoalPlace !== undefined ? settings.winterfestGoalPlace : 50;
+        heroTournamentMode = settings.heroTournamentMode || false;
+        heroTournamentGoalPlace = settings.heroTournamentGoalPlace !== undefined ? settings.heroTournamentGoalPlace : 15;
     }
 
     function saveSettings() {
@@ -359,7 +371,9 @@
             rushMode: rushMode,
             autoCollectRewards: autoCollectRewards,
             winterfestMode: winterfestMode,
-            winterfestGoalPlace: winterfestGoalPlace
+            winterfestGoalPlace: winterfestGoalPlace,
+            heroTournamentMode: heroTournamentMode,
+            heroTournamentGoalPlace: heroTournamentGoalPlace
         });
     }
 
@@ -1071,7 +1085,53 @@
     }
     
     function getCurrentUserId() {
-        return getGameValue('userId', null, true);
+        // Try multiple methods to get user ID
+        let userId = getGameValue('userId', null, true);
+        
+        // If not found, try alternative methods
+        if (!userId) {
+            // Try from game object directly
+            if (window.game && window.game.userId) {
+                userId = String(window.game.userId);
+            } else if (window.game && window.game.user && window.game.user.id) {
+                userId = String(window.game.user.id);
+            } else if (window.game && window.game.playerId) {
+                userId = String(window.game.playerId);
+            }
+            
+            // Try from HWH GameData
+            if (!userId && window.HWHClasses && window.HWHClasses.GameData) {
+                const gameData = window.HWHClasses.GameData.getInst();
+                if (gameData) {
+                    if (gameData.userId) {
+                        userId = String(gameData.userId);
+                    } else if (gameData.user && gameData.user.id) {
+                        userId = String(gameData.user.id);
+                    } else if (gameData.playerId) {
+                        userId = String(gameData.playerId);
+                    }
+                }
+            }
+            
+            // Try from localStorage/sessionStorage (common HWH storage locations)
+            if (!userId) {
+                try {
+                    const stored = localStorage.getItem('userId') || 
+                                  localStorage.getItem('user_id') || 
+                                  localStorage.getItem('playerId') ||
+                                  sessionStorage.getItem('userId') ||
+                                  sessionStorage.getItem('user_id') ||
+                                  sessionStorage.getItem('playerId');
+                    if (stored) {
+                        userId = String(stored);
+                    }
+                } catch (e) {
+                    // Ignore storage errors
+                }
+            }
+        }
+        
+        return userId;
     }
     
     async function fetchWinterfestRanking() {
@@ -1240,6 +1300,230 @@
         if (winterfestInterval) {
             clearTimeout(winterfestInterval);
             winterfestInterval = null;
+        }
+    }
+
+    // --- HERO TOURNAMENT RANKING POLLING ---
+    async function fetchHeroTournamentRanking() {
+        try {
+            const { Send, HWHFuncs } = window;
+            const currentUserId = getCurrentUserId();
+            
+            // Call powerTournament_getGroupInfo API
+            const callToExecute = {
+                name: 'powerTournament_getGroupInfo',
+                args: {},
+                context: {
+                    actionTs: Math.floor(performance.now())
+                },
+                ident: 'body' // Use 'body' like winterfest for consistency
+            };
+            
+            const response = await Send({ calls: [callToExecute] });
+            
+            // Process response
+            let responseData = null;
+            
+            // Try format 1: response.results[0] (standard format)
+            if (response && response.results && response.results.length > 0) {
+                const result = response.results[0];
+                if (result && result.result && result.result.response) {
+                    responseData = result.result.response;
+                }
+            }
+            
+            // Fallback: find by ident
+            if (!responseData && response && response.results && response.results.length > 0) {
+                const result = response.results.find(r => r.ident === 'body' || r.ident === 'powerTournament_getGroupInfo');
+                if (result && result.result && result.result.response) {
+                    responseData = result.result.response;
+                }
+            }
+            
+            if (!responseData) {
+                console.error('Action Replay: Hero Tournament - Could not parse response structure');
+                return;
+            }
+            
+            const users = responseData.users || {};
+            const points = responseData.points || {};
+            
+            if (Object.keys(points).length === 0) {
+                console.log('Action Replay: Hero Tournament - No points data available (tournament may not be active)');
+                return;
+            }
+            
+            // Calculate ranking by sorting points in descending order
+            const sortedEntries = Object.entries(points)
+                .map(([userId, pointsValue]) => ({
+                    userId: userId,
+                    points: pointsValue,
+                    user: users[userId] || null
+                }))
+                .sort((a, b) => b.points - a.points); // Sort descending by points
+            
+            // Find user's rank (1-based)
+            let myRank = null;
+            let myPoints = null;
+            
+            if (currentUserId) {
+                const currentUserIdStr = String(currentUserId);
+                
+                const myEntry = sortedEntries.find((entry, index) => {
+                    // Try both string and number comparison
+                    const entryUserId = String(entry.userId);
+                    if (entryUserId === currentUserIdStr) {
+                        myRank = index + 1; // 1-based rank
+                        myPoints = entry.points;
+                        return true;
+                    }
+                    return false;
+                });
+                
+                // Try to find by comparing as numbers too (in case of type mismatch)
+                if (!myEntry) {
+                    const currentUserIdNum = parseInt(currentUserIdStr);
+                    if (!isNaN(currentUserIdNum)) {
+                        sortedEntries.find((entry, index) => {
+                            const entryUserIdNum = parseInt(String(entry.userId));
+                            if (entryUserIdNum === currentUserIdNum) {
+                                myRank = index + 1;
+                                myPoints = entry.points;
+                                return true;
+                            }
+                            return false;
+                        });
+                    }
+                }
+            } else {
+                // If we can't get userId, we can't determine ranking
+                console.warn('Action Replay: Hero Tournament - Cannot determine user ranking without userId. Please ensure you are logged in.');
+            }
+            
+            // If goal is 0, only output 1st place and my userId
+            if (heroTournamentGoalPlace === 0) {
+                if (sortedEntries.length > 0) {
+                    const firstPlace = sortedEntries[0];
+                    console.log(`Action Replay: Hero Tournament Ranking - 1st Place: ${firstPlace.user?.name || 'Unknown'} (User ${firstPlace.userId}), Points: ${firstPlace.points}`);
+                    if (currentUserId && myRank !== null && myPoints !== null) {
+                        console.log(`Action Replay: Hero Tournament Ranking - My Ranking: Place ${myRank}, UserID: ${currentUserId}, Points: ${myPoints}`);
+                    } else if (currentUserId) {
+                        console.log(`Action Replay: Hero Tournament Ranking - My UserID: ${currentUserId} (not ranked - tool requires you to be ranked to work correctly)`);
+                    } else {
+                        console.log(`Action Replay: Hero Tournament Ranking - No UserID found (cannot determine ranking)`);
+                    }
+                }
+            } else {
+                // Goal is set, output goal place, my ranking, and difference
+                const goalIndex = heroTournamentGoalPlace - 1; // Convert to 0-based index
+                
+                if (goalIndex >= 0 && goalIndex < sortedEntries.length) {
+                    const goalEntry = sortedEntries[goalIndex];
+                    const goalPoints = parseInt(goalEntry.points) || 0;
+                    
+                    console.log(`Action Replay: Hero Tournament Ranking - Goal Place ${heroTournamentGoalPlace}: ${goalEntry.user?.name || 'Unknown'} (User ${goalEntry.userId}), Points: ${goalEntry.points}`);
+                    
+                    if (currentUserId && myRank !== null && myPoints !== null) {
+                        const myPointsNum = parseInt(myPoints) || 0;
+                        const difference = myPointsNum - goalPoints;
+                        
+                        console.log(`Action Replay: Hero Tournament Ranking - My Ranking: Place ${myRank}, UserID: ${currentUserId}, Points: ${myPoints}`);
+                        console.log(`Action Replay: Hero Tournament Ranking - Difference: ${difference > 0 ? '+' : ''}${difference} (My Points - Goal Place Points)`);
+                        
+                        // Check if my place is lower (worse) than goal place (higher number = worse rank)
+                        if (myRank > heroTournamentGoalPlace) {
+                            console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
+                            await executeAllRecordingsForHeroTournament();
+                        } else {
+                            console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is better than or equal to goal (${heroTournamentGoalPlace}), no action needed`);
+                        }
+                    } else if (currentUserId) {
+                        console.log(`Action Replay: Hero Tournament Ranking - My UserID: ${currentUserId} (not ranked - tool requires you to be ranked to work correctly)`);
+                    } else {
+                        console.log(`Action Replay: Hero Tournament Ranking - No UserID found (cannot determine ranking or execute recordings)`);
+                    }
+                } else {
+                    console.log(`Action Replay: Hero Tournament Ranking - Goal place ${heroTournamentGoalPlace} is out of range (max: ${sortedEntries.length})`);
+                    if (currentUserId && myRank !== null && myPoints !== null) {
+                        // Check if my place is lower (worse) than goal place
+                        // Note: User must be ranked (have a rank) for this to work
+                        if (myRank > heroTournamentGoalPlace) {
+                            console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
+                            await executeAllRecordingsForHeroTournament();
+                        } else {
+                            console.log(`Action Replay: Hero Tournament Ranking - My Ranking: Place ${myRank}, UserID: ${currentUserId}, Points: ${myPoints}`);
+                        }
+                    } else if (currentUserId) {
+                        console.log(`Action Replay: Hero Tournament Ranking - My UserID: ${currentUserId} (not ranked - tool requires you to be ranked to work correctly)`);
+                    } else {
+                        console.log(`Action Replay: Hero Tournament Ranking - No UserID found (cannot determine ranking or execute recordings)`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Action Replay: Error fetching hero tournament ranking:', error);
+        }
+    }
+    
+    async function executeAllRecordingsForHeroTournament() {
+        // Get all recordings (not just autoRun ones) but filter out expired ones
+        const now = Date.now();
+        const allRecordings = recordings.filter(rec => {
+            // Skip expired recordings
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
+            return true;
+        });
+
+        if (allRecordings.length === 0) {
+            console.log('Action Replay: Hero Tournament - No recordings to execute');
+            return;
+        }
+
+        console.log(`Action Replay: Hero Tournament - Executing ${allRecordings.length} recording(s)...`);
+        
+        await executeRecordingsBatch(allRecordings, {
+            errorPrefix: 'Action Replay: Hero Tournament',
+            showProgress: true
+        });
+        
+        console.log('Action Replay: Hero Tournament - All recordings completed, resuming ranking check...');
+    }
+    
+    async function runHeroTournamentPollingCycle() {
+        if (!heroTournamentMode) {
+            stopHeroTournamentPolling();
+            return;
+        }
+        
+        try {
+            // Fetch ranking and execute recordings if needed (this will wait for completion)
+            await fetchHeroTournamentRanking();
+        } catch (error) {
+            console.error('Action Replay: Error in hero tournament polling cycle:', error);
+        }
+        
+        // Schedule next check only after current one completes (including recording execution)
+        if (heroTournamentMode) {
+            heroTournamentInterval = setTimeout(() => {
+                runHeroTournamentPollingCycle();
+            }, 3000);
+        }
+    }
+    
+    function startHeroTournamentPolling() {
+        // Clear any existing timeout/interval
+        if (heroTournamentInterval) {
+            clearTimeout(heroTournamentInterval);
+        }
+        
+        // Start the polling cycle (will recursively schedule itself)
+        runHeroTournamentPollingCycle();
+    }
+    
+    function stopHeroTournamentPolling() {
+        if (heroTournamentInterval) {
+            clearTimeout(heroTournamentInterval);
+            heroTournamentInterval = null;
         }
     }
 
@@ -1433,7 +1717,7 @@
         popup.innerHTML = `
             <button class="api-repeater-close-btn">&times;</button>
             <h2>Action Replay <span style="background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; padding: 4px 12px; border-radius: 12px; font-size: 0.6em; font-weight: bold; margin-left: 10px; text-transform: uppercase; letter-spacing: 1px;">🏆 Tournament</span></h2>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac;">
                     <input type="checkbox" id="winterfest-mode-checkbox" ${winterfestMode ? 'checked' : ''} style="margin-right: 5px;">
                     <span>❄️ Winterfest Mode</span>
@@ -1441,6 +1725,15 @@
                 <label style="display: flex; align-items: center; gap: 8px; color: #fce1ac;">
                     <span>Goal:</span>
                     <input type="number" id="winterfest-goal-place-input" min="0" max="50" value="${winterfestGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
+                    <span>place</span>
+                </label>
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac; margin-left: 15px;">
+                    <input type="checkbox" id="hero-tournament-mode-checkbox" ${heroTournamentMode ? 'checked' : ''} style="margin-right: 5px;">
+                    <span>🏆 Hero Tournament Mode</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; color: #fce1ac;">
+                    <span>Goal:</span>
+                    <input type="number" id="hero-tournament-goal-place-input" min="0" max="50" value="${heroTournamentGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
                     <span>place</span>
                 </label>
             </div>
@@ -1529,6 +1822,23 @@
             if (value < 0) value = 0;
             if (value > 50) value = 50;
             winterfestGoalPlace = value;
+            e.target.value = value;
+            saveSettings();
+        });
+        document.getElementById('hero-tournament-mode-checkbox').addEventListener('change', (e) => {
+            heroTournamentMode = e.target.checked;
+            saveSettings();
+            if (heroTournamentMode) {
+                startHeroTournamentPolling();
+            } else {
+                stopHeroTournamentPolling();
+            }
+        });
+        document.getElementById('hero-tournament-goal-place-input').addEventListener('change', (e) => {
+            let value = parseInt(e.target.value) || 0;
+            if (value < 0) value = 0;
+            if (value > 50) value = 50;
+            heroTournamentGoalPlace = value;
             e.target.value = value;
             saveSettings();
         });
