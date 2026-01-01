@@ -1,0 +1,101 @@
+{
+  "recordings": [
+    {
+      "id": "1767103229693_7is07g3pf",
+      "name": "SendFireWorks",
+      "description": "Anamous",
+      "createdAt": 1767103229693,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "newYear_fireworksLaunch",
+          "args": {
+            "hideName": true,
+            "hideClan": true
+          },
+          "context": {
+            "actionTs": 541605
+          },
+          "ident": "body"
+        }
+      ]
+    },
+    {
+      "id": "1767103347437_a789crrhg",
+      "name": "SendGifttoOdethChief40K",
+      "description": "40k Skingifts",
+      "createdAt": 1767103347437,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "newYear_giftSend",
+          "args": {
+            "userId": "35902122",
+            "amount": 1,
+            "giftNum": 4,
+            "users": {
+              "35902122": 1,
+              "35986432": 1
+            }
+          },
+          "context": {
+            "actionTs": 644233
+          },
+          "ident": "body"
+        },
+        {
+          "name": "newYear_getPersonalTops",
+          "args": {},
+          "context": {
+            "actionTs": 644233
+          },
+          "ident": "newYear_getPersonalTops"
+        }
+      ]
+    },
+    {
+      "id": "1767103442892_wnsfmq8ie",
+      "name": "SendGifttoSKESkylight",
+      "description": "1kGifts",
+      "createdAt": 1767103442892,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "newYear_giftSend",
+          "args": {
+            "userId": "35891708",
+            "amount": 1,
+            "giftNum": 3,
+            "users": {
+              "35449277": 1,
+              "35891708": 1
+            }
+          },
+          "context": {
+            "actionTs": 741319
+          },
+          "ident": "body"
+        },
+        {
+          "name": "newYear_getPersonalTops",
+          "args": {},
+          "context": {
+            "actionTs": 741319
+          },
+          "ident": "newYear_getPersonalTops"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2026-01-01T16:20:33.541Z",
+  "version": "1.1.6"
+}
