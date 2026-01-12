@@ -23,6 +23,7 @@
     let recordings = [];
     let isRecording = false;
     let recordingBuffer = [];
+    let recordingInitialPosition = null; // Store initial position when recording starts
     let originalSend = null;
     let recordingButton = null;
     let recordingButtonText = null;
@@ -40,7 +41,6 @@
 
     // --- STORAGE KEYS ---
     const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
-    const STORAGE_SETTINGS = 'aocAutoMovement_settings';
 
     // --- AOC API CALLS TO RECORD ---
     const AOC_API_CALLS = new Set([
@@ -70,6 +70,57 @@
             this._aocRepeaterMethod = method;
             return originalXHROpen.apply(this, [method, url, ...args]);
         };
+        
+        // Intercept response to capture enemy IDs from getEnemyTeams
+        const originalXHROnReadyStateChange = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'onreadystatechange') ||
+                                               { get: function() { return this._aocOnReadyStateChange; },
+                                                 set: function(fn) { this._aocOnReadyStateChange = fn; } };
+        
+        Object.defineProperty(XMLHttpRequest.prototype, 'onreadystatechange', {
+            get: function() {
+                return this._aocOnReadyStateChange;
+            },
+            set: function(fn) {
+                const self = this;
+                this._aocOnReadyStateChange = function() {
+                    // When request completes and we're recording, capture enemy IDs
+                    if (isRecording && self.readyState === 4 && self.status === 200) {
+                        try {
+                            const responseText = self.responseText;
+                            if (responseText && typeof responseText === 'string' && responseText.length > 0) {
+                                const responseData = JSON.parse(responseText);
+                                if (responseData && responseData.results && Array.isArray(responseData.results)) {
+                                    for (const result of responseData.results) {
+                                        if (result && result.result && result.result.response) {
+                                            const response = result.result.response;
+                                            // Check if this is a getEnemyTeams response (array of enemies with userId)
+                                            if (Array.isArray(response) && response.length > 0 && response[0].userId) {
+                                                const enemyIds = response.map(enemy => enemy.userId).filter(id => id != null);
+                                                if (enemyIds.length > 0) {
+                                                    // Find the last getEnemyTeams call in buffer and add enemy IDs
+                                                    for (let i = recordingBuffer.length - 1; i >= 0; i--) {
+                                                        if (recordingBuffer[i].name === 'clanDomination_getEnemyTeams') {
+                                                            recordingBuffer[i].enemyIds = enemyIds;
+                                                            console.log(`AOC: Captured ${enemyIds.length} enemy ID(s) during recording: ${enemyIds.join(', ')}`);
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+                    if (fn) fn.call(self);
+                };
+            },
+            configurable: true,
+            enumerable: true
+        });
         
         XMLHttpRequest.prototype.send = function(sourceData) {
             if (!isRecording) {
@@ -113,7 +164,8 @@
                                             name: call.name,
                                             args: call.args || {},
                                             context: call.context || { actionTs: now },
-                                            ident: call.ident || 'body'
+                                            ident: call.ident || 'body',
+                                            enemyIds: [] // Will be populated from response
                                         });
                                     }
                                 } else if (callData.name && callData.args) {
@@ -122,7 +174,8 @@
                                             name: callData.name,
                                             args: callData.args || {},
                                             context: callData.context || { actionTs: Date.now() },
-                                            ident: callData.ident || 'body'
+                                            ident: callData.ident || 'body',
+                                            enemyIds: [] // Will be populated from response
                                         });
                                     }
                                 }
@@ -160,7 +213,6 @@
         HWHFuncs.addExtentionName(EXTENSION_NAME, EXTENSION_VERSION, EXTENSION_AUTHOR);
 
         loadRecordings();
-        loadSettings();
         setupAPIInterseption();
 
         const scriptMenu = HWHClasses.ScriptMenu.getInst();
@@ -229,6 +281,25 @@
                 rec.repeatCount = 1;
                 hasChanges = true;
             }
+            // Backward compatibility: if initialPosition is missing, set it to null
+            if (rec.initialPosition === undefined || rec.initialPosition === null) {
+                rec.initialPosition = null;
+                hasChanges = true;
+            }
+            // Backward compatibility: if path is missing, build it from initialPosition and apiCalls
+            if (!rec.path || !Array.isArray(rec.path) || rec.path.length === 0) {
+                const path = [];
+                if (rec.initialPosition !== null && rec.initialPosition !== undefined) {
+                    path.push(Number(rec.initialPosition));
+                }
+                rec.apiCalls.forEach((call) => {
+                    if (call.name === 'clanDomination_move' && call.args && call.args.levelId) {
+                        path.push(Number(call.args.levelId));
+                    }
+                });
+                rec.path = path;
+                hasChanges = true;
+            }
         });
         
         if (hasChanges) {
@@ -248,15 +319,6 @@
         }, 100);
     }
 
-    function loadSettings() {
-        const { HWHFuncs } = window;
-        const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
-    }
-
-    function saveSettings() {
-        const { HWHFuncs } = window;
-        HWHFuncs.setSaveVal(STORAGE_SETTINGS, {});
-    }
 
     // --- RECORDING MANAGEMENT ---
     function getEnabledRecordings() {
@@ -304,13 +366,26 @@
         }
     }
 
-    function startRecording() {
+    async function startRecording() {
         isRecording = true;
         recordingBuffer = [];
+        recordingInitialPosition = null;
         lastBufferCount = 0;
         lastRecordingState = null;
-        const { HWHFuncs } = window;
-        HWHFuncs.setProgress('AOC: Recording started', true);
+        
+        // Capture initial position when recording starts
+        const initialPosition = await getCurrentPosition();
+        if (initialPosition !== null) {
+            // Store as number for consistency
+            recordingInitialPosition = Number(initialPosition);
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress(`AOC: Recording started from position ${recordingInitialPosition}`, true);
+            console.log(`AOC: Recording initial position captured: ${recordingInitialPosition} (type: ${typeof recordingInitialPosition})`);
+        } else {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('AOC: Recording started (position unknown)', true);
+            console.warn('AOC: Could not capture initial position when starting recording');
+        }
         updateRecordingButton();
     }
 
@@ -328,6 +403,25 @@
             return shouldRecordAPICall(call.name);
         });
         
+        // Ensure initial position is stored as number
+        const initialPos = recordingInitialPosition !== null && recordingInitialPosition !== undefined 
+            ? Number(recordingInitialPosition) 
+            : null;
+        
+        // Build the complete path: [initialPosition, move1, move2, move3, ...]
+        const path = [];
+        if (initialPos !== null) {
+            path.push(initialPos);
+        }
+        
+        // Add all move destinations in order
+        filteredCalls.forEach((call) => {
+            if (call.name === 'clanDomination_move' && call.args && call.args.levelId) {
+                const movePos = Number(call.args.levelId);
+                path.push(movePos);
+            }
+        });
+        
         const recording = {
             id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
             name: name || 'Unnamed AOC Recording',
@@ -337,12 +431,17 @@
             expiresAt: expirationDays > 0 ? Date.now() + (expirationDays * 24 * 60 * 60 * 1000) : null,
             autoRun: autoRun || false,
             repeatCount: repeatCount || 1,
+            initialPosition: initialPos, // Store the initial position as number (for backward compatibility)
+            path: path, // Store the complete path array for fast lookup
             apiCalls: filteredCalls
         };
+        
+        console.log(`AOC: Creating recording "${recording.name}" with path: [${path.join(', ')}]`);
         
         recordings.push(recording);
         saveRecordings();
         recordingBuffer = [];
+        recordingInitialPosition = null; // Reset after saving
         updateRecordingButton();
         return recording;
     }
@@ -500,11 +599,187 @@
         }
     }
 
+    async function getMapState() {
+        try {
+            const { Send } = window;
+            if (!Send) {
+                return null;
+            }
+            
+            const response = await Send({
+                calls: [{
+                    name: 'clanDomination_mapState',
+                    args: {},
+                    context: { actionTs: Math.floor(performance.now()) },
+                    ident: 'body'
+                }]
+            });
+            
+            if (response && response.results && response.results.length > 0) {
+                const result = response.results.find(r => r.ident === 'body');
+                if (result && result.result && result.result.response) {
+                    return result.result.response;
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('AOC: Error getting map state:', error);
+            return null;
+        }
+    }
+
+    async function getCurrentPosition() {
+        try {
+            // Try from HWHFuncs.getUserInfo()
+            let userId = null;
+            if (window.HWHFuncs && window.HWHFuncs.getUserInfo) {
+                const userInfo = window.HWHFuncs.getUserInfo();
+                if (userInfo && userInfo.id) {
+                    userId = String(userInfo.id);
+                }
+            }
+            
+            if (!userId) {
+                if (window.game && window.game.userId) {
+                    userId = String(window.game.userId);
+                } else if (window.HWHClasses && window.HWHClasses.GameData) {
+                    const gameData = window.HWHClasses.GameData.getInst();
+                    if (gameData && gameData.userId) {
+                        userId = String(gameData.userId);
+                    }
+                }
+            }
+            
+            if (!userId) {
+                return null;
+            }
+            
+            const mapState = await getMapState();
+            if (mapState && mapState.userPositions) {
+                const userIdStr = String(userId);
+                return mapState.userPositions[userIdStr] || mapState.userPositions[userId] || null;
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('AOC: Error getting current position:', error);
+            return null;
+        }
+    }
+
+    function getRemainingMovesFromResponse(response) {
+        try {
+            if (response && response.results && response.results.length > 0) {
+                const result = response.results.find(r => r.ident === 'body');
+                if (result && result.result && result.result.response && result.result.response.refillable) {
+                    return result.result.response.refillable.amount;
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('AOC: Error extracting remaining moves from response:', error);
+            return null;
+        }
+    }
+
     async function executeRecordingInternal(recording) {
         const { Send, HWHFuncs } = window;
         
         if (!recording || !recording.apiCalls || recording.apiCalls.length === 0) {
             HWHFuncs.setProgress(`AOC: ${recording.name} - No moves to replay`, true);
+            return;
+        }
+
+        // Note: Remaining moves will be checked from move API responses during execution
+        // We don't check here to avoid making unnecessary API calls
+
+        // Check current position and find matching step
+        HWHFuncs.setProgress(`AOC: ${recording.name} - Checking current position...`, false);
+        const currentPosition = await getCurrentPosition();
+        
+        if (currentPosition === null) {
+            HWHFuncs.setProgress(`AOC: ${recording.name} - Cannot get current position. Skipping.`, true);
+            return;
+        }
+        
+        // Normalize current position to number for comparison
+        const currentPosNum = Number(currentPosition);
+        
+        // Get the path from recording (pre-computed during recording creation)
+        // If path doesn't exist (old recordings), build it on the fly for backward compatibility
+        let path = recording.path;
+        if (!path || !Array.isArray(path) || path.length === 0) {
+            // Backward compatibility: build path from initialPosition and apiCalls
+            path = [];
+            if (recording.initialPosition !== null && recording.initialPosition !== undefined) {
+                path.push(Number(recording.initialPosition));
+            }
+            recording.apiCalls.forEach((call) => {
+                if (call.name === 'clanDomination_move' && call.args && call.args.levelId) {
+                    path.push(Number(call.args.levelId));
+                }
+            });
+        }
+        
+        // Find the index of current position in the path
+        let pathIndex = -1;
+        for (let i = 0; i < path.length; i++) {
+            if (Number(path[i]) === currentPosNum) {
+                pathIndex = i;
+                break;
+            }
+        }
+        
+        // If not found, try loose comparison as fallback
+        if (pathIndex === -1) {
+            for (let i = 0; i < path.length; i++) {
+                if (path[i] == currentPosition) {
+                    pathIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        console.log(`AOC: ${recording.name} - Path: [${path.join(', ')}]`);
+        console.log(`AOC: ${recording.name} - Current position: ${currentPosition} (num: ${currentPosNum})`);
+        console.log(`AOC: ${recording.name} - Path index found: ${pathIndex}`);
+        
+        let startIndex = 0;
+        let foundMatch = false;
+        
+        if (pathIndex >= 0) {
+            foundMatch = true;
+            // pathIndex 0 = initial position, start from beginning (index 0 of apiCalls)
+            // pathIndex 1+ = at a move destination, need to find which move call corresponds to this position
+            if (pathIndex === 0) {
+                // At initial position, start from the beginning
+                startIndex = 0;
+                HWHFuncs.setProgress(`AOC: ${recording.name} - Current position ${currentPosition} matches initial position. Starting from beginning.`, false);
+            } else {
+                // At a move destination, find the corresponding move call index
+                // path[1] corresponds to the first move, path[2] to the second move, etc.
+                let moveCallIndex = 0;
+                let moveCount = 0;
+                for (let i = 0; i < recording.apiCalls.length; i++) {
+                    if (recording.apiCalls[i].name === 'clanDomination_move') {
+                        moveCount++;
+                        if (moveCount === pathIndex) {
+                            // This is the move that got us to path[pathIndex]
+                            moveCallIndex = i + 1; // Start from the next call after this move
+                            break;
+                        }
+                    }
+                }
+                startIndex = moveCallIndex;
+                HWHFuncs.setProgress(`AOC: ${recording.name} - Current position ${currentPosition} found at path index ${pathIndex}. Continuing from step ${startIndex + 1}.`, false);
+            }
+        }
+        
+        if (!foundMatch) {
+            HWHFuncs.setProgress(`AOC: ${recording.name} - Current position ${currentPosition} not found in recording path. Skipping.`, true);
+            console.error(`AOC: ${recording.name} - Current position ${currentPosition} (num: ${currentPosNum}) not in recording path.`);
+            console.error(`AOC: ${recording.name} - Path: [${path.join(', ')}]`);
             return;
         }
 
@@ -524,7 +799,17 @@
                 HWHFuncs.setProgress(`AOC: ${recording.name} - Replay ${repeatIndex + 1}/${repeatCount}...`, true);
             }
             
-            for (let i = 0; i < recording.apiCalls.length; i++) {
+            // Track enemy IDs from getEnemyTeams responses
+            let lastEnemyIds = [];
+            
+            // Start from the matching step only on first repeat, subsequent repeats start from beginning
+            const loopStartIndex = (repeatIndex === 0 && foundMatch) ? startIndex : 0;
+            
+            if (repeatIndex === 0 && foundMatch) {
+                HWHFuncs.setProgress(`AOC: ${recording.name} - Starting from step ${startIndex + 1} (position ${currentPosition} found)`, false);
+            }
+            
+            for (let i = loopStartIndex; i < recording.apiCalls.length; i++) {
                 if (playAllAborted || recordingAborted) {
                     HWHFuncs.setProgress(`AOC: ${recording.name} - Playback interrupted`, true);
                     return;
@@ -533,26 +818,64 @@
                 const call = recording.apiCalls[i];
                 
                 try {
-                    const callToExecute = {
+                    let callToExecute = {
                         name: call.name,
                         args: call.args,
                         context: { actionTs: Math.floor(performance.now()) },
                         ident: 'body'
                     };
 
-                    const response = await Send({ calls: [callToExecute] });
-                    
-                    // Check for remaining moves and stop if 0
-                    if (response && response.results && response.results.length > 0) {
-                        const result = response.results.find(r => r.ident === 'body');
-                        if (result && result.result && result.result.response && result.result.response.refillable) {
-                            const remainingMoves = result.result.response.refillable.amount;
-                            if (remainingMoves === 0 || remainingMoves === null || remainingMoves === undefined) {
-                                HWHFuncs.setProgress('AOC: No moves remaining. Stopping playback.', true);
-                                return;
-                            }
+                    // If this is startBattle, use enemy ID from previous getEnemyTeams response or recorded enemy IDs
+                    if (call.name === 'clanDomination_startBattle') {
+                        let targetEnemyId = null;
+                        
+                        // First try to use enemy IDs from the most recent getEnemyTeams response
+                        if (lastEnemyIds.length > 0) {
+                            targetEnemyId = lastEnemyIds[0];
+                            HWHFuncs.setProgress(`AOC: Using enemy ID ${targetEnemyId} from previous getEnemyTeams response`, false);
+                        } 
+                        // Fallback to recorded enemy IDs if available
+                        else if (call.enemyIds && Array.isArray(call.enemyIds) && call.enemyIds.length > 0) {
+                            targetEnemyId = call.enemyIds[0];
+                            HWHFuncs.setProgress(`AOC: Using recorded enemy ID ${targetEnemyId}`, false);
                         }
                         
+                        if (targetEnemyId) {
+                            callToExecute.args = {
+                                ...callToExecute.args,
+                                targetId: String(targetEnemyId)
+                            };
+                        }
+                    }
+
+                    const response = await Send({ calls: [callToExecute] });
+                    
+                    // Capture enemy IDs from getEnemyTeams response
+                    if (call.name === 'clanDomination_getEnemyTeams' && response && response.results && response.results.length > 0) {
+                        const result = response.results.find(r => r.ident === 'body');
+                        if (result && result.result && result.result.response && Array.isArray(result.result.response)) {
+                            lastEnemyIds = result.result.response.map(enemy => enemy.userId).filter(id => id != null);
+                            if (lastEnemyIds.length > 0) {
+                                HWHFuncs.setProgress(`AOC: Captured ${lastEnemyIds.length} enemy ID(s): ${lastEnemyIds.join(', ')}`, false);
+                            }
+                        }
+                    }
+                    
+                    // Check for remaining moves from move API response and stop if 0
+                    if (call.name === 'clanDomination_move') {
+                        const remainingMoves = getRemainingMovesFromResponse(response);
+                        if (remainingMoves !== null && remainingMoves === 0) {
+                            const message = 'AOC: No moves remaining (0). Stopping all recordings.';
+                            HWHFuncs.setProgress(message, true);
+                            console.log(message);
+                            playAllAborted = true; // Stop all further playback
+                            return;
+                        }
+                    }
+                    
+                    // Check for API errors
+                    if (response && response.results && response.results.length > 0) {
+                        const result = response.results.find(r => r.ident === 'body');
                         if (result && result.result && result.result.error) {
                             const errorMsg = `API Error: ${result.result.error.name || 'Unknown'} - ${result.result.error.description || 'No description'}`;
                             totalFailureCount++;
@@ -577,6 +900,9 @@
                     }
                 }
             }
+            
+            // Reset enemy IDs for next repeat
+            lastEnemyIds = [];
             
             if (repeatIndex < repeatCount - 1) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
@@ -607,6 +933,9 @@
             }
             return;
         }
+        
+        // Note: Remaining moves will be checked from move API responses during execution
+        // We don't check here to avoid making unnecessary API calls
         
         if (showProgress) {
             const { HWHFuncs } = window;
@@ -680,8 +1009,12 @@
             .aoc-popup-main h2 { text-align: center; margin-top: 0; border-bottom: 1px solid #ce9767; padding-bottom: 10px; }
             .aoc-controls { display: flex; gap: 10px; align-items: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; }
             .aoc-recording-list { list-style: none; padding: 0; margin: 0; }
-            .aoc-recording-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #4a3422; background: rgba(0,0,0,0.2); }
+            .aoc-recording-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #4a3422; background: rgba(0,0,0,0.2); cursor: move; }
             .aoc-recording-item:last-child { border-bottom: none; }
+            .aoc-recording-item.dragging { opacity: 0.5; background: rgba(76, 175, 80, 0.3); }
+            .aoc-recording-item.drag-over { border-color: #4CAF50; border-width: 2px; }
+            .aoc-recording-drag-handle { color: #aaa; margin-right: 8px; cursor: grab; font-size: 16px; }
+            .aoc-recording-drag-handle:active { cursor: grabbing; }
             .aoc-recording-info { flex-grow: 1; margin-right: 15px; }
             .aoc-recording-name { font-weight: bold; color: #ffd700; margin-bottom: 5px; }
             .aoc-recording-description { font-size: 0.9em; color: #ccc; margin-bottom: 5px; }
@@ -700,6 +1033,20 @@
             @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
             .aoc-edit-popup-main { min-width: 500px !important; }
             .aoc-repeat-count { width: 50px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center; font-size: 14px; }
+            .aoc-expand-btn { cursor: pointer; color: #aaa; font-size: 0.9em; margin-left: 10px; }
+            .aoc-expand-btn:hover { color: #fce1ac; }
+            .aoc-calls-expanded { margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 4px; max-height: 400px; overflow-y: auto; }
+            .aoc-calls-list { list-style: none; padding: 0; margin: 10px 0; max-height: 300px; overflow-y: auto; }
+            .aoc-call-item { display: flex; align-items: center; padding: 8px; margin: 5px 0; background: rgba(0,0,0,0.3); border: 1px solid #4a3422; border-radius: 4px; cursor: move; }
+            .aoc-call-item:hover { background: rgba(0,0,0,0.5); border-color: #ce9767; }
+            .aoc-call-item.dragging { opacity: 0.5; background: rgba(76, 175, 80, 0.3); }
+            .aoc-call-item.drag-over { border-color: #4CAF50; border-width: 2px; }
+            .aoc-call-number { min-width: 30px; color: #aaa; font-weight: bold; margin-right: 10px; }
+            .aoc-call-name { flex-grow: 1; color: #fce1ac; }
+            .aoc-drag-handle { color: #aaa; margin-right: 8px; cursor: grab; }
+            .aoc-drag-handle:active { cursor: grabbing; }
+            .aoc-call-delete { color: #ff6b6b; cursor: pointer; margin-left: 8px; font-size: 14px; padding: 2px 6px; }
+            .aoc-call-delete:hover { color: #ff4444; transform: scale(1.2); }
         `;
         
         const styleSheet = document.createElement("style");
@@ -771,6 +1118,119 @@
         document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
     }
 
+    function setupApiCallsDragDrop(recordingId, apiCalls) {
+        const callsList = document.getElementById(`calls-list-${recordingId}`);
+        if (!callsList) return;
+        
+        let reorderedApiCalls = [...apiCalls];
+
+        callsList.onclick = (e) => {
+            if (e.target.classList.contains('aoc-call-delete') || e.target.closest('.aoc-call-delete')) {
+                const deleteBtn = e.target.classList.contains('aoc-call-delete') ? e.target : e.target.closest('.aoc-call-delete');
+                const callIndex = parseInt(deleteBtn.dataset.callIndex);
+
+                if (!isNaN(callIndex) && callIndex >= 0 && callIndex < reorderedApiCalls.length) {
+                    reorderedApiCalls.splice(callIndex, 1);
+
+                    const recording = recordings.find(r => r.id === recordingId);
+                    if (recording) {
+                        recording.apiCalls = reorderedApiCalls;
+                        saveRecordings();
+                    }
+
+                    renderCallsList();
+                }
+            }
+        };
+        
+        function renderCallsList() {
+            callsList.innerHTML = '';
+            reorderedApiCalls.forEach((call, index) => {
+                const li = document.createElement('li');
+                li.className = 'aoc-call-item';
+                li.draggable = true;
+                li.dataset.index = index;
+                
+                // Format call details
+                let callDetails = call.name;
+                if (call.args && Object.keys(call.args).length > 0) {
+                    if (call.name === 'clanDomination_move' && call.args.levelId) {
+                        callDetails += ` → Level ${call.args.levelId}`;
+                    } else if (call.name === 'clanDomination_getEnemyTeams' && call.args.levelId) {
+                        callDetails += ` (Level ${call.args.levelId})`;
+                        // Show enemy IDs if stored
+                        if (call.enemyIds && Array.isArray(call.enemyIds) && call.enemyIds.length > 0) {
+                            callDetails += ` - Enemy IDs: ${call.enemyIds.join(', ')}`;
+                        }
+                    } else if (call.name === 'clanDomination_startBattle' && call.args.targetId) {
+                        callDetails += ` (Target: ${call.args.targetId})`;
+                    } else {
+                        callDetails += ` (${JSON.stringify(call.args).substring(0, 50)}...)`;
+                    }
+                }
+                
+                li.innerHTML = `
+                    <span class="aoc-drag-handle">☰</span>
+                    <span class="aoc-call-number">${index + 1}.</span>
+                    <span class="aoc-call-name">${callDetails}</span>
+                    <span class="aoc-call-delete" data-action="delete-call" data-call-index="${index}" title="Delete this move">🗑️</span>
+                `;
+                
+                li.addEventListener('dragstart', (e) => {
+                    if (e.target.classList.contains('aoc-call-delete') || e.target.closest('.aoc-call-delete')) {
+                        e.preventDefault();
+                        return;
+                    }
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', index.toString());
+                    li.classList.add('dragging');
+                });
+                
+                li.addEventListener('dragend', () => {
+                    li.classList.remove('dragging');
+                    callsList.querySelectorAll('.aoc-call-item').forEach(item => {
+                        item.classList.remove('drag-over');
+                    });
+                });
+                
+                li.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    li.classList.add('drag-over');
+                });
+                
+                li.addEventListener('dragleave', () => {
+                    li.classList.remove('drag-over');
+                });
+                
+                li.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    li.classList.remove('drag-over');
+                    
+                    const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                    const targetIndex = parseInt(li.dataset.index);
+                    
+                    if (!isNaN(draggedIndex) && !isNaN(targetIndex) && draggedIndex !== targetIndex) {
+                        const [movedItem] = reorderedApiCalls.splice(draggedIndex, 1);
+                        reorderedApiCalls.splice(targetIndex, 0, movedItem);
+                        
+                        const recording = recordings.find(r => r.id === recordingId);
+                        if (recording) {
+                            recording.apiCalls = reorderedApiCalls;
+                            saveRecordings();
+                        }
+                        
+                        renderCallsList();
+                    }
+                });
+                
+                callsList.appendChild(li);
+            });
+        }
+        
+        renderCallsList();
+    }
+
     function populateRecordingsList() {
         const list = document.getElementById('recordings-list');
         if (!list) return;
@@ -794,6 +1254,18 @@
                     populateRecordingsList();
                 } else if (actionType === 'edit') {
                     openEditRecordingPopup(recording);
+                } else if (actionType === 'expand') {
+                    e.stopPropagation();
+                    const expandedDiv = document.getElementById(`calls-${recordingId}`);
+                    if (expandedDiv) {
+                        const isVisible = expandedDiv.style.display !== 'none';
+                        expandedDiv.style.display = isVisible ? 'none' : 'block';
+                        action.textContent = isVisible ? '▼' : '▲';
+
+                        if (!isVisible) {
+                            setupApiCallsDragDrop(recordingId, recording.apiCalls);
+                        }
+                    }
                 }
             });
 
@@ -821,24 +1293,33 @@
             return;
         }
         
-        recordings.forEach((recording) => {
+        recordings.forEach((recording, index) => {
             const li = document.createElement('li');
             li.className = 'aoc-recording-item';
+            li.draggable = true;
+            li.dataset.recordingIndex = index;
             
             const expired = isExpired(recording);
             const expiredBadge = expired ? '<span class="aoc-status-badge aoc-status-expired">Expired</span>' : '';
             const activeBadge = recording.autoRun ? '<span class="aoc-status-badge aoc-status-active">Auto-Run</span>' : '';
             
             li.innerHTML = `
+                <span class="aoc-recording-drag-handle">☰</span>
                 <div class="aoc-recording-info" style="flex-grow: 1;">
                     <div class="aoc-recording-name">
                         ${recording.name} ${expiredBadge} ${activeBadge}
+                        <span class="aoc-expand-btn" data-action="expand" data-id="${recording.id}" title="Show/hide moves">▼</span>
                     </div>
                     <div class="aoc-recording-description">${recording.description || 'No description'}</div>
                     <div class="aoc-recording-meta">
+                        Path: ${recording.path && recording.path.length > 0 ? `[${recording.path.join(' → ')}]` : 'Unknown'} | 
                         Moves: ${recording.apiCalls.length} | 
                         Created: ${formatDate(recording.createdAt)} | 
                         Expires: ${recording.expirationDays === 0 ? 'Never' : formatDate(recording.expiresAt)}
+                    </div>
+                    <div class="aoc-calls-expanded" id="calls-${recording.id}" style="display: none;">
+                        <div style="font-weight: bold; margin-bottom: 8px;">Moves (drag to reorder):</div>
+                        <ul class="aoc-calls-list" id="calls-list-${recording.id}"></ul>
                     </div>
                 </div>
                 <div class="aoc-recording-actions">
@@ -852,6 +1333,64 @@
                     <button class="aoc-btn aoc-btn-danger" title="Delete" data-action="delete" data-id="${recording.id}">🗑️</button>
                 </div>
             `;
+            
+            // Drag and drop handlers for recording item
+            li.addEventListener('dragstart', (e) => {
+                if (e.target.closest('button') || 
+                    e.target.closest('.aoc-expand-btn') || 
+                    e.target.closest('.aoc-calls-expanded') ||
+                    e.target.closest('.aoc-call-item')) {
+                    e.preventDefault();
+                    return;
+                }
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', index.toString());
+                li.classList.add('dragging');
+            });
+            
+            li.addEventListener('dragend', () => {
+                li.classList.remove('dragging');
+                list.querySelectorAll('.aoc-recording-item').forEach(item => {
+                    item.classList.remove('drag-over');
+                });
+            });
+            
+            li.addEventListener('dragover', (e) => {
+                if (e.target.closest('button') || 
+                    e.target.closest('.aoc-expand-btn') || 
+                    e.target.closest('.aoc-calls-expanded') ||
+                    e.target.closest('.aoc-call-item')) {
+                    return;
+                }
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                li.classList.add('drag-over');
+            });
+            
+            li.addEventListener('dragleave', () => {
+                li.classList.remove('drag-over');
+            });
+            
+            li.addEventListener('drop', (e) => {
+                if (e.target.closest('button') || 
+                    e.target.closest('.aoc-expand-btn') || 
+                    e.target.closest('.aoc-calls-expanded') ||
+                    e.target.closest('.aoc-call-item')) {
+                    return;
+                }
+                e.preventDefault();
+                li.classList.remove('drag-over');
+                
+                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                const targetIndex = parseInt(li.dataset.recordingIndex);
+                
+                if (!isNaN(draggedIndex) && !isNaN(targetIndex) && draggedIndex !== targetIndex) {
+                    const [movedRecording] = recordings.splice(draggedIndex, 1);
+                    recordings.splice(targetIndex, 0, movedRecording);
+                    saveRecordings();
+                    populateRecordingsList();
+                }
+            });
             
             list.appendChild(li);
         });
