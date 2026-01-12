@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AOC Auto Movement HwH Ext
 // @namespace    HeroWarsHelper.AOCAutoMovement
-// @version      1.0.0
-// @description  Automatic Area of Conquest movement from base to midtown with auto-attack
+// @version      2.0.0
+// @description  Record and replay AOC movements with auto-run support
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
 // @match        https://www.hero-wars.com/*
@@ -16,441 +16,129 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "1.0.0";
+    const EXTENSION_VERSION = "2.0.0";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
-    let aocMode = false; // AOC auto-movement mode toggle
-    let aocRunning = false; // Track if AOC movement is currently running
-    let aocAborted = false; // Flag to abort AOC movement
-    let aocButton = null; // Reference to the AOC button
+    let recordings = [];
+    let isRecording = false;
+    let recordingBuffer = [];
+    let originalSend = null;
+    let recordingButton = null;
+    let recordingButtonText = null;
+    let playAllButton = null;
+    let playAllButtonText = null;
+    let updateButtonInterval = null;
+    let lastBufferCount = 0;
+    let lastRecordingState = null;
+    let executionQueue = Promise.resolve();
+    let autoRunScheduled = false;
+    let isPlaying = false;
+    let playAllAborted = false;
+    let currentlyPlayingRecordingId = null;
+    let recordingAborted = false;
 
     // --- STORAGE KEYS ---
+    const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
     const STORAGE_SETTINGS = 'aocAutoMovement_settings';
 
-    // --- MOVEMENT PATHS CONFIGURATION ---
-    const AOC_MOVEMENT_PATHS = {
-        693: [693, 603, 519, 441, 369, 303, 249, 201, 159, 153, 111, 75, 51, 45, 21, 9, 3],
-        696: [696, 606, 522, 444, 438, 366, 306, 252, 204, 162, 156, 114, 78, 54, 48, 24, 12, 6]
-    };
+    // --- AOC API CALLS TO RECORD ---
+    const AOC_API_CALLS = new Set([
+        'clanDomination_move',
+        'clanDomination_getEnemyTeams',
+        'clanDomination_startBattle',
+        'clanDomination_mapState'
+    ]);
 
-    // --- STORAGE SYSTEM ---
-    function loadSettings() {
-        const { HWHFuncs } = window;
-        if (!HWHFuncs || !HWHFuncs.getSaveVal) return;
-        
-        const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
-        aocMode = settings.aocMode || false;
+    function shouldRecordAPICall(apiName) {
+        if (!apiName || typeof apiName !== 'string') return false;
+        return AOC_API_CALLS.has(apiName);
     }
 
-    function saveSettings() {
-        const { HWHFuncs } = window;
-        if (!HWHFuncs || !HWHFuncs.setSaveVal) return;
-        
-        HWHFuncs.setSaveVal(STORAGE_SETTINGS, {
-            aocMode: aocMode
-        });
+    function enqueueExecution(taskFn) {
+        executionQueue = executionQueue.then(taskFn, taskFn);
+        return executionQueue;
     }
 
-    // --- UTILITY FUNCTIONS ---
-    function getCurrentUserId() {
-        // Try from HWHFuncs.getUserInfo()
-        if (window.HWHFuncs && window.HWHFuncs.getUserInfo) {
-            const userInfo = window.HWHFuncs.getUserInfo();
-            if (userInfo && userInfo.id) {
-                return String(userInfo.id);
-            }
-        }
+    // --- EARLY API INTERCEPTION (before HWH loads) ---
+    (function() {
+        const originalXHRSend = XMLHttpRequest.prototype.send;
+        const originalXHROpen = XMLHttpRequest.prototype.open;
         
-        // Try from game state
-        if (window.game && window.game.userId) {
-            return String(window.game.userId);
-        }
+        XMLHttpRequest.prototype.open = function(method, url, ...args) {
+            this._aocRepeaterUrl = url;
+            this._aocRepeaterMethod = method;
+            return originalXHROpen.apply(this, [method, url, ...args]);
+        };
         
-        // Try from HWHClasses.GameData
-        if (window.HWHClasses && window.HWHClasses.GameData) {
-            const gameData = window.HWHClasses.GameData.getInst();
-            if (gameData && gameData.userId) {
-                return String(gameData.userId);
-            }
-        }
-        
-        return null;
-    }
-
-    async function getMapState() {
-        const { Send } = window;
-        if (!Send) {
-            throw new Error('Send function not available');
-        }
-        
-        const response = await Send({
-            calls: [{
-                name: 'clanDomination_mapState',
-                args: {},
-                context: { actionTs: Math.floor(performance.now()) },
-                ident: 'body'
-            }]
-        });
-        
-        if (response && response.results && response.results.length > 0) {
-            const result = response.results.find(r => r.ident === 'body');
-            if (result && result.result && result.result.response) {
-                return result.result.response;
-            }
-        }
-        
-        return null;
-    }
-
-    async function detectInitialBase() {
-        try {
-            const mapState = await getMapState();
-            if (mapState && mapState.map && mapState.map.levels && mapState.map.levels.length > 0) {
-                // First level in the array is the initial base
-                return mapState.map.levels[0].id;
-            }
-            return null;
-        } catch (error) {
-            console.error('AOC: Error detecting initial base:', error);
-            return null;
-        }
-    }
-
-    async function getCurrentPosition() {
-        try {
-            const userId = getCurrentUserId();
-            if (!userId) {
-                console.error('AOC: Cannot get current position - userId not found');
-                return null;
+        XMLHttpRequest.prototype.send = function(sourceData) {
+            if (!isRecording) {
+                return originalXHRSend.apply(this, arguments);
             }
             
-            const mapState = await getMapState();
-            if (mapState && mapState.userPositions) {
-                // Current position is in userPositions[userId] - userPositions is an object
-                // where keys are user IDs (as strings) and values are position numbers
-                // Try both string and number key to handle type mismatches
-                const userIdStr = String(userId);
-                return mapState.userPositions[userIdStr] || mapState.userPositions[userId] || null;
-            }
-            return null;
-        } catch (error) {
-            console.error('AOC: Error getting current position:', error);
-            return null;
-        }
-    }
-
-    async function getPlayerClanId() {
-        try {
-            // Try from HWHFuncs.getUserInfo()
-            if (window.HWHFuncs && window.HWHFuncs.getUserInfo) {
-                const userInfo = window.HWHFuncs.getUserInfo();
-                if (userInfo && userInfo.clanId) {
-                    return String(userInfo.clanId);
-                }
-            }
-            
-            // Try from userGetInfo API call
-            const { Send } = window;
-            if (!Send) {
-                return null;
-            }
-            
-            const response = await Send({
-                calls: [{
-                    name: 'userGetInfo',
-                    args: {},
-                    context: { actionTs: Math.floor(performance.now()) },
-                    ident: 'body'
-                }]
-            });
-            
-            if (response && response.results && response.results.length > 0) {
-                const result = response.results.find(r => r.ident === 'body');
-                if (result && result.result && result.result.response && result.result.response.clanId) {
-                    return String(result.result.response.clanId);
-                }
-            }
-            
-            return null;
-        } catch (error) {
-            console.error('AOC: Error getting player clan ID:', error);
-            return null;
-        }
-    }
-
-    async function checkMidtownStatus() {
-        try {
-            const mapState = await getMapState();
-            if (!mapState || !mapState.townPositions) {
-                return 'unknown';
-            }
-            
-            const midtown = mapState.townPositions['1'];
-            if (!midtown) {
-                return 'unknown';
-            }
-            
-            // If status is 0, midtown is unoccupied
-            if (midtown.status === 0 || !midtown.userId) {
-                return 'unoccupied';
-            }
-            
-            // Get player's clan ID
-            const playerClanId = await getPlayerClanId();
-            if (!playerClanId) {
-                return 'unknown';
-            }
-            
-            // If userId matches current user, it's friendly
-            const userId = getCurrentUserId();
-            if (midtown.userId == userId) {
-                return 'friendly';
-            }
-            
-            // For now, if userId doesn't match, assume enemy
-            // This could be enhanced later to check if they're in the same clan
-            return 'enemy';
-        } catch (error) {
-            console.error('AOC: Error checking midtown status:', error);
-            return 'unknown';
-        }
-    }
-
-    function getAdjacentToMidtown(visibleLevels) {
-        // Positions 3 and 6 are both adjacent to midtown (position 1)
-        // Prefer position 3, fall back to position 6
-        if (visibleLevels && Array.isArray(visibleLevels)) {
-            if (visibleLevels.includes(3)) {
-                return 3;
-            }
-            if (visibleLevels.includes(6)) {
-                return 6;
-            }
-        }
-        return null;
-    }
-
-    function stopAOCMovement() {
-        aocAborted = true;
-        aocRunning = false;
-        const { HWHFuncs } = window;
-        if (HWHFuncs && HWHFuncs.setProgress) {
-            HWHFuncs.setProgress('AOC: Movement stopped', true);
-        }
-        updateAOCButton();
-    }
-
-    function updateAOCButton() {
-        if (!aocButton) return;
-        
-        const buttonText = aocButton.querySelector('.scriptMenu_btnPlate');
-        if (buttonText) {
-            if (aocRunning) {
-                buttonText.textContent = '⏹ AOC';
-                aocButton.title = 'Stop AOC movement';
-            } else {
-                buttonText.textContent = '🏰 AOC';
-                aocButton.title = 'Start AOC auto movement';
-            }
-        }
-    }
-
-    async function executeAOCMovement() {
-        const { Send, HWHFuncs } = window;
-        
-        if (!Send || !HWHFuncs) {
-            console.error('AOC: Required functions not available');
-            return;
-        }
-        
-        if (aocRunning) {
-            stopAOCMovement();
-            return;
-        }
-        
-        aocRunning = true;
-        aocAborted = false;
-        updateAOCButton();
-        
-        try {
-            HWHFuncs.setProgress('AOC: Initializing...', false);
-            
-            // 1. Get current user ID
-            const userId = getCurrentUserId();
-            if (!userId) {
-                throw new Error('Cannot get current user ID');
-            }
-            
-            // 2. Get map state
-            HWHFuncs.setProgress('AOC: Getting map state...', false);
-            const mapState = await getMapState();
-            if (!mapState) {
-                throw new Error('Cannot get map state');
-            }
-            
-            // 3. Detect initial base
-            HWHFuncs.setProgress('AOC: Detecting initial base...', false);
-            const initialBase = mapState.map.levels[0].id;
-            if (!initialBase || !AOC_MOVEMENT_PATHS[initialBase]) {
-                throw new Error(`Unknown initial base: ${initialBase}`);
-            }
-            
-            // 4. Get current position from userPositions[userId]
-            // userPositions is an object where keys are user IDs and values are positions
-            const userIdStr = String(userId);
-            const currentPosition = mapState.userPositions[userIdStr] || mapState.userPositions[userId];
-            if (!currentPosition) {
-                throw new Error(`Cannot get current position for userId: ${userId}`);
-            }
-            
-            // 5. Get movement path
-            const movementPath = AOC_MOVEMENT_PATHS[initialBase];
-            
-            // 6. Determine target position (adjacent to midtown)
-            // Use visible levels from map state
-            const visibleLevelIds = mapState.map.levels.map(l => l.id);
-            const targetPosition = getAdjacentToMidtown(visibleLevelIds);
-            if (!targetPosition) {
-                throw new Error('Cannot find adjacent position to midtown');
-            }
-            
-            // 7. Check if player is already at target position
-            if (currentPosition === targetPosition || currentPosition === 3 || currentPosition === 6) {
-                HWHFuncs.setProgress('AOC: Already at adjacent position to midtown', false);
-                // Skip movement and go directly to midtown check
-            } else {
-                // 8. Find current position in path
-                const currentIndex = movementPath.indexOf(currentPosition);
+            if (this._aocRepeaterUrl && typeof this._aocRepeaterUrl === 'string') {
+                const url = this._aocRepeaterUrl;
+                const isApiCall = url.includes('/api/') || url.includes('nextersglobal.com');
                 
-                if (currentIndex === -1) {
-                    // Not on the path, don't do anything
-                    HWHFuncs.setProgress(`AOC: Current position ${currentPosition} is not in the route. Nothing to do.`, true);
-                    aocRunning = false;
-                    updateAOCButton();
-                    return;
-                }
-                
-                // Player is on the route, continue from next position
-                HWHFuncs.setProgress(`AOC: Continuing route from position ${currentPosition}...`, false);
-                
-                // 9. Movement loop - continue from current position
-                const startIndex = currentIndex + 1; // Start from next position
-                
-                for (let i = startIndex; i < movementPath.length; i++) {
-                    if (aocAborted) {
-                        HWHFuncs.setProgress('AOC: Movement aborted', true);
-                        aocRunning = false;
-                        updateAOCButton();
-                        return;
-                    }
-                    
-                    const nextPosition = movementPath[i];
-                    
-                    // Stop if we've reached the target adjacent position
-                    if (nextPosition === targetPosition || nextPosition === 3 || nextPosition === 6) {
-                        break;
-                    }
-                    
-                    HWHFuncs.setProgress(`AOC: Moving to position ${nextPosition}...`, false);
-                    
-                    // Make move
-                    const moveResponse = await Send({
-                        calls: [{
-                            name: 'clanDomination_move',
-                            args: { levelId: nextPosition },
-                            context: { actionTs: Math.floor(performance.now()) },
-                            ident: 'body'
-                        }]
-                    });
-                    
-                    // Check for errors in move response
-                    if (moveResponse && moveResponse.results && moveResponse.results.length > 0) {
-                        const result = moveResponse.results.find(r => r.ident === 'body');
-                        if (result && result.result && result.result.error) {
-                            throw new Error(`Move failed: ${result.result.error.description || result.result.error.name || 'Unknown error'}`);
+                if (isApiCall) {
+                    try {
+                        let callData = null;
+                        let tempData = null;
+                        
+                        if (sourceData && typeof sourceData === 'string') {
+                            tempData = sourceData;
+                        } else if (sourceData instanceof ArrayBuffer) {
+                            const decoder = new TextDecoder('utf-8');
+                            tempData = decoder.decode(sourceData);
+                        } else {
+                            tempData = sourceData;
                         }
-                    }
-                    
-                    // Wait between moves
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-            }
-            
-            // 10. Check midtown status (after movement or if already at target)
-            HWHFuncs.setProgress('AOC: Checking midtown status...', false);
-            const midtownStatus = await checkMidtownStatus();
-            
-            if (midtownStatus === 'friendly') {
-                HWHFuncs.setProgress('AOC: Midtown is occupied by your clan. Stopping adjacent to midtown.', true);
-                aocRunning = false;
-                updateAOCButton();
-                return;
-            }
-            
-            // 12. Attack logic (if enemy or unoccupied)
-            if (midtownStatus === 'enemy' || midtownStatus === 'unoccupied') {
-                HWHFuncs.setProgress('AOC: Getting enemy teams at midtown...', false);
-                
-                const enemyResponse = await Send({
-                    calls: [{
-                        name: 'clanDomination_getEnemyTeams',
-                        args: { levelId: 1 },
-                        context: { actionTs: Math.floor(performance.now()) },
-                        ident: 'body'
-                    }]
-                });
-                
-                if (enemyResponse && enemyResponse.results && enemyResponse.results.length > 0) {
-                    const result = enemyResponse.results.find(r => r.ident === 'body');
-                    if (result && result.result) {
-                        if (result.result.error) {
-                            HWHFuncs.setProgress(`AOC: Error getting enemy teams: ${result.result.error.description || result.result.error.name || 'Unknown error'}`, true);
-                        } else if (result.result.response && Array.isArray(result.result.response)) {
-                            const enemies = result.result.response;
-                            if (enemies.length > 0) {
-                                // Attack first enemy
-                                const targetUserId = enemies[0].userId;
-                                HWHFuncs.setProgress(`AOC: Attacking enemy at midtown (User ${targetUserId})...`, false);
-                                
-                                const battleResponse = await Send({
-                                    calls: [{
-                                        name: 'clanDomination_startBattle',
-                                        args: { targetId: String(targetUserId) },
-                                        context: { actionTs: Math.floor(performance.now()) },
-                                        ident: 'body'
-                                    }]
-                                });
-                                
-                                if (battleResponse && battleResponse.results && battleResponse.results.length > 0) {
-                                    const battleResult = battleResponse.results.find(r => r.ident === 'body');
-                                    if (battleResult && battleResult.result && battleResult.result.error) {
-                                        HWHFuncs.setProgress(`AOC: Attack failed: ${battleResult.result.error.description || battleResult.result.error.name || 'Unknown error'}`, true);
-                                    } else {
-                                        HWHFuncs.setProgress('AOC: Attack initiated', true);
+                        
+                        if (tempData && typeof tempData === 'string') {
+                            if (tempData.length === 0 || (!tempData.includes('"name"') && !tempData.includes('"calls"'))) {
+                                return originalXHRSend.apply(this, arguments);
+                            }
+                            callData = JSON.parse(tempData);
+                            
+                            if (callData) {
+                                if (callData.calls && Array.isArray(callData.calls)) {
+                                    const calls = callData.calls;
+                                    const now = Date.now();
+                                    for (let i = 0; i < calls.length; i++) {
+                                        const call = calls[i];
+                                        if (!call || !call.name) continue;
+                                        if (!shouldRecordAPICall(call.name)) continue;
+                                        
+                                        recordingBuffer.push({
+                                            name: call.name,
+                                            args: call.args || {},
+                                            context: call.context || { actionTs: now },
+                                            ident: call.ident || 'body'
+                                        });
                                     }
-                                } else {
-                                    HWHFuncs.setProgress('AOC: Attack initiated', true);
+                                } else if (callData.name && callData.args) {
+                                    if (shouldRecordAPICall(callData.name)) {
+                                        recordingBuffer.push({
+                                            name: callData.name,
+                                            args: callData.args || {},
+                                            context: callData.context || { actionTs: Date.now() },
+                                            ident: callData.ident || 'body'
+                                        });
+                                    }
                                 }
-                            } else {
-                                HWHFuncs.setProgress('AOC: No enemies found at midtown', true);
                             }
                         }
+                    } catch (e) {
+                        console.error('AOC: Error capturing action:', e, sourceData);
                     }
                 }
             }
             
-            aocRunning = false;
-            updateAOCButton();
-            HWHFuncs.setProgress('AOC: Movement completed', true);
-            
-        } catch (error) {
-            console.error('AOC: Error during movement:', error);
-            HWHFuncs.setProgress(`AOC: Error - ${error.message}`, true);
-            aocRunning = false;
-            updateAOCButton();
-        }
-    }
+            return originalXHRSend.apply(this, arguments);
+        };
+        
+        console.log('AOC: Early XHR interception setup complete (document-start)');
+    })();
 
     // --- INITIALIZATION ---
     function waitForHWH(callback) {
@@ -466,90 +154,986 @@
     }
 
     function initializeExtension() {
-        try {
-            console.log(`${EXTENSION_NAME} v${EXTENSION_VERSION} is loading...`);
-            
-            const { HWHFuncs, HWHClasses } = window;
-            
-            if (!HWHFuncs || !HWHClasses) {
-                console.error(`${EXTENSION_NAME}: HWHFuncs or HWHClasses not available`);
-                return;
+        console.log(`${EXTENSION_NAME} v${EXTENSION_VERSION} is loading...`);
+        
+        const { HWHFuncs, HWHClasses } = window;
+        HWHFuncs.addExtentionName(EXTENSION_NAME, EXTENSION_VERSION, EXTENSION_AUTHOR);
+
+        loadRecordings();
+        loadSettings();
+        setupAPIInterseption();
+
+        const scriptMenu = HWHClasses.ScriptMenu.getInst();
+        const buttonGroup = scriptMenu.addCombinedButton([
+            {
+                name: 'AOC',
+                title: 'AOC Auto Movement',
+                onClick: openMainPopup,
+                color: 'green'
+            },
+            {
+                name: '⏺ 0',
+                title: 'Click to start/stop recording AOC moves',
+                onClick: toggleRecording,
+                color: 'red'
+            },
+            {
+                name: '▶️',
+                title: 'Play all enabled recordings',
+                onClick: togglePlayAll,
+                color: 'blue'
             }
-            
-            // Register extension
-            HWHFuncs.addExtentionName(EXTENSION_NAME, EXTENSION_VERSION, EXTENSION_AUTHOR);
-            console.log(`${EXTENSION_NAME}: Extension registered`);
-            
-            // Load settings
-            loadSettings();
-            console.log(`${EXTENSION_NAME}: Settings loaded, aocMode = ${aocMode}`);
-            
-            // Get ScriptMenu instance
-            const scriptMenu = HWHClasses.ScriptMenu.getInst();
-            if (!scriptMenu) {
-                console.error(`${EXTENSION_NAME}: ScriptMenu instance not available`);
-                return;
-            }
-            
-            console.log(`${EXTENSION_NAME}: ScriptMenu instance obtained`);
-            
-            // Add AOC button to menu
-            try {
-                const buttonGroup = scriptMenu.addCombinedButton([
-                    {
-                        name: aocRunning ? '⏹ AOC' : '🏰 AOC',
-                        title: aocRunning ? 'Stop AOC movement' : 'Start AOC auto movement',
-                        onClick: executeAOCMovement,
-                        color: 'green'
-                    }
-                ]);
-                
-                console.log(`${EXTENSION_NAME}: Button added, buttonGroup:`, buttonGroup);
-                
-                // Get reference to AOC button
-                if (buttonGroup && buttonGroup.children && buttonGroup.children.length > 0) {
-                    aocButton = buttonGroup.children[0];
-                    console.log(`${EXTENSION_NAME}: AOC button reference stored`);
-                }
-            } catch (error) {
-                console.error(`${EXTENSION_NAME}: Error adding button:`, error);
-            }
-            
-            // Add checkbox for auto-run
-            try {
-                const checkbox = scriptMenu.addCheckbox(
-                    'AOC Auto Movement',
-                    'Automatically run AOC movement on script load'
-                );
-                
-                console.log(`${EXTENSION_NAME}: Checkbox added:`, checkbox);
-                
-                // Set initial checked state
-                if (checkbox) {
-                    checkbox.checked = aocMode;
-                    // Add event listener for changes
-                    checkbox.addEventListener('change', (event) => {
-                        aocMode = event.target.checked;
-                        saveSettings();
-                        console.log(`${EXTENSION_NAME}: Checkbox changed, aocMode = ${aocMode}`);
-                    });
-                }
-            } catch (error) {
-                console.error(`${EXTENSION_NAME}: Error adding checkbox:`, error);
-            }
-            
-            // Auto-start if enabled
-            if (aocMode) {
-                console.log(`${EXTENSION_NAME}: Auto-start enabled, scheduling execution in 5 seconds`);
-                setTimeout(() => {
-                    executeAOCMovement();
-                }, 5000); // Wait 5 seconds after script load
-            }
-            
-            console.log(`${EXTENSION_NAME} initialized successfully.`);
-        } catch (error) {
-            console.error(`${EXTENSION_NAME}: Error during initialization:`, error);
+        ]);
+        
+        if (buttonGroup && buttonGroup.children && buttonGroup.children.length > 2) {
+            recordingButton = buttonGroup.children[1];
+            playAllButton = buttonGroup.children[2];
+            recordingButtonText = recordingButton.querySelector('.scriptMenu_btnPlate');
+            playAllButtonText = playAllButton.querySelector('.scriptMenu_btnPlate');
         }
+        
+        updateButtonInterval = setInterval(updateRecordingButton, 500);
+        updatePlayAllButton();
+        scheduleAutoRuns();
+
+        console.log(`${EXTENSION_NAME} initialized successfully.`);
+    }
+
+    // --- API INTERCEPTION ---
+    function setupAPIInterseption() {
+        if (window.Send && !originalSend) {
+            originalSend = window.Send;
+            window.Send = async function(data) {
+                return await originalSend.apply(this, arguments);
+            };
+            console.log('AOC: Send function wrapped');
+        }
+    }
+
+    // --- STORAGE SYSTEM ---
+    function loadRecordings() {
+        const { HWHFuncs } = window;
+        recordings = HWHFuncs.getSaveVal(STORAGE_RECORDINGS, []);
+        recordings = recordings.filter(rec => rec && rec.id && rec.apiCalls && Array.isArray(rec.apiCalls));
+        
+        const now = Date.now();
+        let hasChanges = false;
+        recordings.forEach(rec => {
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) {
+                if (rec.autoRun) {
+                    rec.autoRun = false;
+                    hasChanges = true;
+                }
+            }
+            if (rec.repeatCount === undefined || rec.repeatCount === null || rec.repeatCount < 1) {
+                rec.repeatCount = 1;
+                hasChanges = true;
+            }
+        });
+        
+        if (hasChanges) {
+            saveRecordings();
+        }
+    }
+
+    let saveRecordingsTimeout = null;
+    function saveRecordings() {
+        const { HWHFuncs } = window;
+        if (saveRecordingsTimeout) {
+            clearTimeout(saveRecordingsTimeout);
+        }
+        saveRecordingsTimeout = setTimeout(() => {
+            HWHFuncs.setSaveVal(STORAGE_RECORDINGS, recordings);
+            saveRecordingsTimeout = null;
+        }, 100);
+    }
+
+    function loadSettings() {
+        const { HWHFuncs } = window;
+        const settings = HWHFuncs.getSaveVal(STORAGE_SETTINGS, {});
+    }
+
+    function saveSettings() {
+        const { HWHFuncs } = window;
+        HWHFuncs.setSaveVal(STORAGE_SETTINGS, {});
+    }
+
+    // --- RECORDING MANAGEMENT ---
+    function getEnabledRecordings() {
+        const now = Date.now();
+        return recordings.filter(rec => {
+            if (!rec.autoRun) return false;
+            if (rec.expirationDays > 0 && rec.expiresAt && now > rec.expiresAt) return false;
+            return true;
+        });
+    }
+
+    function toggleRecording() {
+        if (isRecording) {
+            stopRecording();
+            setTimeout(() => {
+                if (recordingBuffer.length > 0) {
+                    openCreateRecordingPopup();
+                } else {
+                    const { HWHFuncs } = window;
+                    HWHFuncs.setProgress('AOC: No AOC moves captured', true);
+                }
+            }, 50);
+        } else {
+            startRecording();
+        }
+    }
+
+    function updateRecordingButton() {
+        if (!recordingButton || !recordingButtonText) return;
+        
+        const bufferCount = recordingBuffer.length;
+        const stateChanged = lastRecordingState !== isRecording;
+        
+        if (!stateChanged && !isRecording && bufferCount === lastBufferCount) return;
+        
+        lastBufferCount = bufferCount;
+        lastRecordingState = isRecording;
+        
+        if (isRecording) {
+            recordingButtonText.textContent = `⏹ ${bufferCount}`;
+            recordingButton.title = `Stop recording (${bufferCount} moves captured)`;
+        } else {
+            recordingButtonText.textContent = `⏺ ${bufferCount}`;
+            recordingButton.title = `Start recording (${bufferCount} moves in buffer)`;
+        }
+    }
+
+    function startRecording() {
+        isRecording = true;
+        recordingBuffer = [];
+        lastBufferCount = 0;
+        lastRecordingState = null;
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress('AOC: Recording started', true);
+        updateRecordingButton();
+    }
+
+    function stopRecording() {
+        isRecording = false;
+        lastRecordingState = null;
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress(`AOC: Recording stopped - ${recordingBuffer.length} moves captured`, true);
+        updateRecordingButton();
+    }
+
+    function createRecording(name, description, expirationDays, autoRun, repeatCount) {
+        const filteredCalls = recordingBuffer.filter(call => {
+            if (!call || !call.name) return false;
+            return shouldRecordAPICall(call.name);
+        });
+        
+        const recording = {
+            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+            name: name || 'Unnamed AOC Recording',
+            description: description || '',
+            createdAt: Date.now(),
+            expirationDays: expirationDays || 0,
+            expiresAt: expirationDays > 0 ? Date.now() + (expirationDays * 24 * 60 * 60 * 1000) : null,
+            autoRun: autoRun || false,
+            repeatCount: repeatCount || 1,
+            apiCalls: filteredCalls
+        };
+        
+        recordings.push(recording);
+        saveRecordings();
+        recordingBuffer = [];
+        updateRecordingButton();
+        return recording;
+    }
+
+    function updateRecording(id, updates) {
+        const recording = recordings.find(r => r.id === id);
+        if (!recording) return false;
+        
+        Object.assign(recording, updates);
+        
+        if (updates.expirationDays !== undefined) {
+            if (updates.expirationDays > 0) {
+                recording.expiresAt = recording.createdAt + (updates.expirationDays * 24 * 60 * 60 * 1000);
+            } else {
+                recording.expiresAt = null;
+            }
+        }
+        
+        saveRecordings();
+        return true;
+    }
+
+    function deleteRecording(id) {
+        const index = recordings.findIndex(r => r.id === id);
+        if (index === -1) return false;
+        recordings.splice(index, 1);
+        saveRecordings();
+        return true;
+    }
+
+    function deleteAllRecordings() {
+        if (recordings.length === 0) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('AOC: No recordings to delete', true);
+            return;
+        }
+        
+        if (!confirm(`Are you sure you want to delete all ${recordings.length} recording(s)?`)) {
+            return;
+        }
+        
+        recordings = [];
+        saveRecordings();
+        
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress('AOC: All recordings deleted', true);
+        
+        const popup = document.getElementById('aoc-popup-container');
+        if (popup) {
+            populateRecordingsList();
+        }
+    }
+
+    function togglePlayAll() {
+        if (isPlaying) {
+            stopPlayback();
+        } else {
+            playAllRecordings();
+        }
+    }
+
+    function playAllRecordings() {
+        const enabledRecordings = getEnabledRecordings();
+
+        if (enabledRecordings.length === 0) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('AOC: No enabled recordings to play', true);
+            return;
+        }
+
+        isPlaying = true;
+        playAllAborted = false;
+        updatePlayAllButton();
+
+        executeRecordingsBatch(enabledRecordings, {
+            checkAbort: () => playAllAborted,
+            onComplete: () => {
+                isPlaying = false;
+                updatePlayAllButton();
+            },
+            errorPrefix: 'AOC',
+            showProgress: true
+        }).catch(() => {
+            isPlaying = false;
+            updatePlayAllButton();
+        });
+    }
+
+    function stopPlayback() {
+        playAllAborted = true;
+        isPlaying = false;
+        updatePlayAllButton();
+        const { HWHFuncs } = window;
+        HWHFuncs.setProgress('AOC: Playback stopped', true);
+    }
+
+    function updatePlayAllButton() {
+        if (!playAllButton || !playAllButtonText) return;
+        
+        if (isPlaying) {
+            playAllButtonText.textContent = '⏹';
+            playAllButton.title = 'Stop playback';
+        } else {
+            playAllButtonText.textContent = '▶️';
+            playAllButton.title = 'Play all enabled recordings';
+        }
+    }
+
+    // --- EXECUTION SYSTEM ---
+    async function executeRecording(recording) {
+        if (currentlyPlayingRecordingId === recording.id) {
+            stopRecordingExecution(recording.id);
+            return;
+        }
+        
+        currentlyPlayingRecordingId = recording.id;
+        recordingAborted = false;
+        updateRecordingButtonState(recording.id, true);
+        
+        return enqueueExecution(() => executeRecordingInternal(recording)).then(() => {
+            if (currentlyPlayingRecordingId === recording.id) {
+                currentlyPlayingRecordingId = null;
+                recordingAborted = false;
+                updateRecordingButtonState(recording.id, false);
+            }
+        }).catch(() => {
+            if (currentlyPlayingRecordingId === recording.id) {
+                currentlyPlayingRecordingId = null;
+                recordingAborted = false;
+                updateRecordingButtonState(recording.id, false);
+            }
+        });
+    }
+    
+    function stopRecordingExecution(recordingId) {
+        if (currentlyPlayingRecordingId === recordingId) {
+            recordingAborted = true;
+            currentlyPlayingRecordingId = null;
+            updateRecordingButtonState(recordingId, false);
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress('AOC: Recording execution stopped', true);
+        }
+    }
+    
+    function updateRecordingButtonState(recordingId, isPlaying) {
+        const button = document.querySelector(`[data-action="run"][data-id="${recordingId}"]`);
+        if (button) {
+            if (isPlaying) {
+                button.textContent = '⏹';
+                button.title = 'Stop execution';
+            } else {
+                button.textContent = '▶️';
+                button.title = 'Replay';
+            }
+        }
+    }
+
+    async function executeRecordingInternal(recording) {
+        const { Send, HWHFuncs } = window;
+        
+        if (!recording || !recording.apiCalls || recording.apiCalls.length === 0) {
+            HWHFuncs.setProgress(`AOC: ${recording.name} - No moves to replay`, true);
+            return;
+        }
+
+        const repeatCount = recording.repeatCount || 1;
+        HWHFuncs.setProgress(`AOC: Replaying ${recording.name} (${repeatCount} time${repeatCount > 1 ? 's' : ''})...`, true);
+        
+        let totalSuccessCount = 0;
+        let totalFailureCount = 0;
+        
+        for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex++) {
+            if (playAllAborted || recordingAborted) {
+                HWHFuncs.setProgress(`AOC: ${recording.name} - Playback interrupted`, true);
+                return;
+            }
+            
+            if (repeatCount > 1) {
+                HWHFuncs.setProgress(`AOC: ${recording.name} - Replay ${repeatIndex + 1}/${repeatCount}...`, true);
+            }
+            
+            for (let i = 0; i < recording.apiCalls.length; i++) {
+                if (playAllAborted || recordingAborted) {
+                    HWHFuncs.setProgress(`AOC: ${recording.name} - Playback interrupted`, true);
+                    return;
+                }
+                
+                const call = recording.apiCalls[i];
+                
+                try {
+                    const callToExecute = {
+                        name: call.name,
+                        args: call.args,
+                        context: { actionTs: Math.floor(performance.now()) },
+                        ident: 'body'
+                    };
+
+                    const response = await Send({ calls: [callToExecute] });
+                    
+                    // Check for remaining moves and stop if 0
+                    if (response && response.results && response.results.length > 0) {
+                        const result = response.results.find(r => r.ident === 'body');
+                        if (result && result.result && result.result.response && result.result.response.refillable) {
+                            const remainingMoves = result.result.response.refillable.amount;
+                            if (remainingMoves === 0 || remainingMoves === null || remainingMoves === undefined) {
+                                HWHFuncs.setProgress('AOC: No moves remaining. Stopping playback.', true);
+                                return;
+                            }
+                        }
+                        
+                        if (result && result.result && result.result.error) {
+                            const errorMsg = `API Error: ${result.result.error.name || 'Unknown'} - ${result.result.error.description || 'No description'}`;
+                            totalFailureCount++;
+                            console.error(`AOC: Step ${i + 1}/${recording.apiCalls.length} (${call.name}) failed:`, errorMsg);
+                        } else {
+                            totalSuccessCount++;
+                        }
+                    } else {
+                        totalSuccessCount++;
+                    }
+                    
+                } catch (e) {
+                    totalFailureCount++;
+                    console.error(`AOC: Step ${i + 1}/${recording.apiCalls.length} (${call.name}) error:`, e);
+                }
+                
+                if (i < recording.apiCalls.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    if (playAllAborted || recordingAborted) {
+                        HWHFuncs.setProgress(`AOC: ${recording.name} - Playback interrupted`, true);
+                        return;
+                    }
+                }
+            }
+            
+            if (repeatIndex < repeatCount - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                if (playAllAborted || recordingAborted) {
+                    HWHFuncs.setProgress(`AOC: ${recording.name} - Playback interrupted`, true);
+                    return;
+                }
+            }
+        }
+        
+        const totalCalls = recording.apiCalls.length * repeatCount;
+        const summary = `AOC: ${recording.name} - Completed: ${totalSuccessCount} succeeded, ${totalFailureCount} failed out of ${totalCalls} total steps`;
+        HWHFuncs.setProgress(summary, true);
+    }
+
+    async function executeRecordingsBatch(enabledRecordings, options = {}) {
+        const {
+            checkAbort = null,
+            onComplete = null,
+            errorPrefix = 'AOC',
+            showProgress = false
+        } = options;
+        
+        if (enabledRecordings.length === 0) {
+            if (showProgress) {
+                const { HWHFuncs } = window;
+                HWHFuncs.setProgress(`${errorPrefix}: No enabled recordings to execute`, true);
+            }
+            return;
+        }
+        
+        if (showProgress) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress(`${errorPrefix}: Executing ${enabledRecordings.length} recording(s)...`, true);
+        }
+        
+        for (const rec of enabledRecordings) {
+            if (checkAbort && checkAbort()) break;
+            
+            await enqueueExecution(async () => {
+                if (checkAbort && checkAbort()) return;
+                try {
+                    await executeRecordingInternal(rec);
+                } catch (e) {
+                    console.error(`${errorPrefix}: Error during execution:`, e);
+                } finally {
+                    if (!checkAbort || !checkAbort()) {
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+            });
+        }
+        
+        await executionQueue;
+        
+        if (onComplete) {
+            onComplete();
+        }
+        
+        if (showProgress) {
+            const { HWHFuncs } = window;
+            HWHFuncs.setProgress(`${errorPrefix}: All recordings completed`, true);
+        }
+    }
+
+    function scheduleAutoRuns() {
+        const enabledRecordings = getEnabledRecordings();
+        if (enabledRecordings.length === 0) return;
+        if (autoRunScheduled) return;
+        autoRunScheduled = true;
+
+        setTimeout(() => {
+            executeRecordingsBatch(enabledRecordings, {
+                errorPrefix: 'AOC',
+                showProgress: false
+            });
+        }, 10000);
+    }
+
+    // --- UI COMPONENTS ---
+    function formatDate(timestamp) {
+        if (!timestamp) return 'Never';
+        const date = new Date(timestamp);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    }
+
+    function isExpired(recording) {
+        if (recording.expirationDays === 0) return false;
+        if (!recording.expiresAt) return false;
+        return Date.now() > recording.expiresAt;
+    }
+
+    async function openMainPopup() {
+        const { HWHFuncs } = window;
+        
+        if (document.getElementById('aoc-popup-container')) return;
+
+        const styles = `
+            .aoc-popup-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10001; }
+            .aoc-popup-main { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #190e08e6; border: 3px #ce9767 solid; border-radius: 10px; z-index: 10002; color: #fce1ac; padding: 20px; min-width: 900px; max-width: 1200px; max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+            .aoc-popup-main h2 { text-align: center; margin-top: 0; border-bottom: 1px solid #ce9767; padding-bottom: 10px; }
+            .aoc-controls { display: flex; gap: 10px; align-items: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; }
+            .aoc-recording-list { list-style: none; padding: 0; margin: 0; }
+            .aoc-recording-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #4a3422; background: rgba(0,0,0,0.2); }
+            .aoc-recording-item:last-child { border-bottom: none; }
+            .aoc-recording-info { flex-grow: 1; margin-right: 15px; }
+            .aoc-recording-name { font-weight: bold; color: #ffd700; margin-bottom: 5px; }
+            .aoc-recording-description { font-size: 0.9em; color: #ccc; margin-bottom: 5px; }
+            .aoc-recording-meta { font-size: 0.8em; color: #aaa; }
+            .aoc-recording-actions { display: flex; gap: 8px; align-items: center; }
+            .aoc-btn { cursor: pointer; font-size: 18px; background: none; border: none; padding: 5px 8px; transition: transform 0.2s; color: #fce1ac; }
+            .aoc-btn:hover { transform: scale(1.2); }
+            .aoc-btn-danger { color: #ff6b6b; }
+            .aoc-btn-success { color: #4CAF50; }
+            .aoc-close-btn { position: absolute; top: 5px; right: 10px; font-size: 24px; color: #ce9767; cursor: pointer; border: none; background: none; }
+            .aoc-footer { border-top: 1px solid #ce9767; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-around; flex-wrap: wrap; gap: 10px; }
+            .aoc-status-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.75em; margin-left: 8px; }
+            .aoc-status-expired { background: #ff6b6b; color: white; }
+            .aoc-status-active { background: #4CAF50; color: white; }
+            .aoc-status-recording { background: #ff4444; color: white; animation: pulse 1s infinite; }
+            @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+            .aoc-edit-popup-main { min-width: 500px !important; }
+            .aoc-repeat-count { width: 50px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center; font-size: 14px; }
+        `;
+        
+        const styleSheet = document.createElement("style");
+        styleSheet.innerText = styles;
+        document.head.appendChild(styleSheet);
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'aoc-popup-backdrop';
+        backdrop.id = 'aoc-popup-container';
+        
+        const popup = document.createElement('div');
+        popup.className = 'aoc-popup-main';
+        
+        const recordingStatus = isRecording ? '🔴 Recording' : '⚪ Stopped';
+        const recordingStatusClass = isRecording ? 'aoc-status-recording' : '';
+        
+        popup.innerHTML = `
+            <button class="aoc-close-btn">&times;</button>
+            <h2>AOC Auto Movement</h2>
+            <div class="aoc-controls">
+                <button id="start-recording-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: ${isRecording ? '#ff4444' : '#4CAF50'}; border-radius: 5px;">
+                    ${isRecording ? '⏹ Stop Recording' : '⏺ Start Recording'}
+                </button>
+                <span class="aoc-status-badge ${recordingStatusClass}">${recordingStatus}</span>
+                <span style="margin-left: auto; color: #aaa;">Captured: ${recordingBuffer.length} moves</span>
+            </div>
+            <div>
+                <h3 style="margin-top: 0; border-bottom: 1px solid #4a3422; padding-bottom: 5px;">Saved Recordings (${recordings.length})</h3>
+                <ul class="aoc-recording-list" id="recordings-list"></ul>
+            </div>
+            <div class="aoc-footer">
+                <button id="export-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #4CAF50; border-radius: 5px;">💾 Export</button>
+                <button id="import-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #2196F3; border-radius: 5px;">📥 Import</button>
+                <button id="delete-all-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #ff4444; border-radius: 5px;">🗑️ Delete All</button>
+            </div>
+        `;
+        
+        backdrop.appendChild(popup);
+        document.body.appendChild(backdrop);
+        
+        populateRecordingsList();
+        
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop || e.target.classList.contains('aoc-close-btn')) {
+                backdrop.remove();
+            }
+        });
+        
+        document.getElementById('start-recording-btn').addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+                backdrop.remove();
+                if (recordingBuffer.length > 0) {
+                    openCreateRecordingPopup();
+                } else {
+                    const { HWHFuncs } = window;
+                    HWHFuncs.setProgress('AOC: No moves captured', true);
+                    openMainPopup();
+                }
+            } else {
+                startRecording();
+                backdrop.remove();
+                openMainPopup();
+            }
+        });
+        
+        document.getElementById('export-btn').addEventListener('click', exportRecordings);
+        document.getElementById('import-btn').addEventListener('click', importRecordings);
+        document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
+    }
+
+    function populateRecordingsList() {
+        const list = document.getElementById('recordings-list');
+        if (!list) return;
+
+        if (!list.dataset.aocListenersAttached) {
+            list.dataset.aocListenersAttached = '1';
+
+            list.addEventListener('click', (e) => {
+                const action = e.target.closest('[data-action]');
+                if (!action) return;
+
+                const actionType = action.dataset.action;
+                const recordingId = action.dataset.id;
+                const recording = recordings.find(r => r.id === recordingId);
+                if (!recording) return;
+
+                if (actionType === 'run') {
+                    executeRecording(recording);
+                } else if (actionType === 'delete') {
+                    deleteRecording(recordingId);
+                    populateRecordingsList();
+                } else if (actionType === 'edit') {
+                    openEditRecordingPopup(recording);
+                }
+            });
+
+            list.addEventListener('change', (e) => {
+                if (e.target.dataset.action === 'toggle-autorun') {
+                    const recordingId = e.target.dataset.id;
+                    updateRecording(recordingId, { autoRun: e.target.checked });
+                    populateRecordingsList();
+                } else if (e.target.dataset.action === 'update-repeat-count') {
+                    const recordingId = e.target.dataset.id;
+                    const repeatCount = parseInt(e.target.value) || 1;
+                    if (repeatCount < 1) {
+                        e.target.value = 1;
+                        return;
+                    }
+                    updateRecording(recordingId, { repeatCount: repeatCount });
+                }
+            });
+        }
+        
+        list.innerHTML = '';
+        
+        if (recordings.length === 0) {
+            list.innerHTML = '<li style="padding: 20px; text-align: center; color: #aaa;">No recordings saved yet</li>';
+            return;
+        }
+        
+        recordings.forEach((recording) => {
+            const li = document.createElement('li');
+            li.className = 'aoc-recording-item';
+            
+            const expired = isExpired(recording);
+            const expiredBadge = expired ? '<span class="aoc-status-badge aoc-status-expired">Expired</span>' : '';
+            const activeBadge = recording.autoRun ? '<span class="aoc-status-badge aoc-status-active">Auto-Run</span>' : '';
+            
+            li.innerHTML = `
+                <div class="aoc-recording-info" style="flex-grow: 1;">
+                    <div class="aoc-recording-name">
+                        ${recording.name} ${expiredBadge} ${activeBadge}
+                    </div>
+                    <div class="aoc-recording-description">${recording.description || 'No description'}</div>
+                    <div class="aoc-recording-meta">
+                        Moves: ${recording.apiCalls.length} | 
+                        Created: ${formatDate(recording.createdAt)} | 
+                        Expires: ${recording.expirationDays === 0 ? 'Never' : formatDate(recording.expiresAt)}
+                    </div>
+                </div>
+                <div class="aoc-recording-actions">
+                    <input type="number" class="aoc-repeat-count" min="1" value="${recording.repeatCount || 1}" data-action="update-repeat-count" data-id="${recording.id}" title="Number of times to repeat">
+                    <button class="aoc-btn aoc-btn-success" title="${currentlyPlayingRecordingId === recording.id ? 'Stop execution' : 'Replay'}" data-action="run" data-id="${recording.id}">${currentlyPlayingRecordingId === recording.id ? '⏹' : '▶️'}</button>
+                    <label style="cursor: pointer;">
+                        <input type="checkbox" ${recording.autoRun ? 'checked' : ''} data-action="toggle-autorun" data-id="${recording.id}" style="margin-right: 5px;">
+                        <span style="font-size: 0.9em;">Auto</span>
+                    </label>
+                    <button class="aoc-btn" title="Edit" data-action="edit" data-id="${recording.id}">✏️</button>
+                    <button class="aoc-btn aoc-btn-danger" title="Delete" data-action="delete" data-id="${recording.id}">🗑️</button>
+                </div>
+            `;
+            
+            list.appendChild(li);
+        });
+    }
+
+    async function openCreateRecordingPopup() {
+        const { HWHFuncs } = window;
+        
+        const existingPopup = document.getElementById('aoc-create-popup-container');
+        if (existingPopup) {
+            existingPopup.remove();
+        }
+        
+        if (recordingBuffer.length === 0) {
+            HWHFuncs.setProgress('AOC: No moves captured', true);
+            return;
+        }
+        
+        const backdrop = document.createElement('div');
+        backdrop.className = 'aoc-popup-backdrop';
+        backdrop.id = 'aoc-create-popup-container';
+        
+        const popup = document.createElement('div');
+        popup.className = 'aoc-popup-main aoc-edit-popup-main';
+        
+        popup.innerHTML = `
+            <button class="aoc-close-btn">&times;</button>
+            <h2>Save Recording</h2>
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Name:</label>
+                    <input type="text" id="recording-name" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;" value="AOC Recording ${new Date().toLocaleString()}">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Description:</label>
+                    <textarea id="recording-description" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac; min-height: 80px;"></textarea>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Expiration (days, 0 = never):</label>
+                    <input type="number" id="recording-expiration" min="0" value="0" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Repeat Count:</label>
+                    <input type="number" id="recording-repeat-count" min="1" value="1" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;">
+                </div>
+                <div>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="recording-autorun">
+                        <span>Auto-run on game load</span>
+                    </label>
+                </div>
+                <div style="color: #aaa; font-size: 0.9em;">
+                    Captured ${recordingBuffer.length} move(s)
+                </div>
+                <div style="display: flex; justify-content: space-around; margin-top: 15px;">
+                    <button id="save-recording-btn" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Save</button>
+                    <button id="cancel-recording-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        backdrop.appendChild(popup);
+        document.body.appendChild(backdrop);
+        
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop || e.target.classList.contains('aoc-close-btn') || e.target.id === 'cancel-recording-btn') {
+                backdrop.remove();
+                if (e.target.id === 'cancel-recording-btn' || e.target.classList.contains('aoc-close-btn')) {
+                    recordingBuffer = [];
+                    updateRecordingButton();
+                }
+                openMainPopup();
+            }
+        });
+        
+        document.getElementById('save-recording-btn').addEventListener('click', () => {
+            const name = document.getElementById('recording-name').value.trim();
+            const description = document.getElementById('recording-description').value.trim();
+            const expirationDays = parseInt(document.getElementById('recording-expiration').value) || 0;
+            const autoRun = document.getElementById('recording-autorun').checked;
+            const repeatCount = parseInt(document.getElementById('recording-repeat-count').value) || 1;
+            
+            if (!name) {
+                alert('Please enter a name for the recording');
+                return;
+            }
+            
+            if (repeatCount < 1) {
+                alert('Repeat count must be at least 1');
+                return;
+            }
+            
+            createRecording(name, description, expirationDays, autoRun, repeatCount);
+            backdrop.remove();
+            
+            const mainPopup = document.getElementById('aoc-popup-container');
+            if (mainPopup) {
+                mainPopup.remove();
+            }
+            openMainPopup();
+        });
+    }
+
+    async function openEditRecordingPopup(recording) {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'aoc-popup-backdrop';
+        backdrop.id = 'aoc-edit-popup-container';
+        
+        const popup = document.createElement('div');
+        popup.className = 'aoc-popup-main aoc-edit-popup-main';
+        
+        popup.innerHTML = `
+            <button class="aoc-close-btn">&times;</button>
+            <h2>Edit Recording</h2>
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Name:</label>
+                    <input type="text" id="edit-recording-name" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;" value="${recording.name}">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Description:</label>
+                    <textarea id="edit-recording-description" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac; min-height: 80px;">${recording.description || ''}</textarea>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Expiration (days, 0 = never):</label>
+                    <input type="number" id="edit-recording-expiration" min="0" value="${recording.expirationDays || 0}" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;">
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px;">Repeat Count:</label>
+                    <input type="number" id="edit-recording-repeat-count" min="1" value="${recording.repeatCount || 1}" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 5px; color: #fce1ac;">
+                </div>
+                <div>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="edit-recording-autorun" ${recording.autoRun ? 'checked' : ''}>
+                        <span>Auto-run on game load</span>
+                    </label>
+                </div>
+                <div style="display: flex; justify-content: space-around; margin-top: 15px;">
+                    <button id="update-recording-btn" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">Update</button>
+                    <button id="cancel-edit-btn" style="padding: 10px 20px; background: #666; color: white; border: none; border-radius: 5px; cursor: pointer;">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        backdrop.appendChild(popup);
+        document.body.appendChild(backdrop);
+        
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop || e.target.classList.contains('aoc-close-btn') || e.target.id === 'cancel-edit-btn') {
+                backdrop.remove();
+            }
+        });
+        
+        document.getElementById('update-recording-btn').addEventListener('click', () => {
+            const name = document.getElementById('edit-recording-name').value.trim();
+            const description = document.getElementById('edit-recording-description').value.trim();
+            const expirationDays = parseInt(document.getElementById('edit-recording-expiration').value) || 0;
+            const autoRun = document.getElementById('edit-recording-autorun').checked;
+            const repeatCount = parseInt(document.getElementById('edit-recording-repeat-count').value) || 1;
+            
+            if (!name) {
+                alert('Please enter a name for the recording');
+                return;
+            }
+            
+            if (repeatCount < 1) {
+                alert('Repeat count must be at least 1');
+                return;
+            }
+            
+            updateRecording(recording.id, {
+                name,
+                description,
+                expirationDays,
+                autoRun,
+                repeatCount
+            });
+            
+            backdrop.remove();
+            
+            const mainPopup = document.getElementById('aoc-popup-container');
+            if (mainPopup) {
+                mainPopup.remove();
+            }
+            openMainPopup();
+        });
+    }
+
+    function exportRecordings() {
+        const { HWHFuncs } = window;
+        const dataToExport = {
+            recordings: recordings,
+            exportDate: new Date().toISOString(),
+            version: EXTENSION_VERSION
+        };
+        
+        const dataStr = JSON.stringify(dataToExport, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `aoc_recordings_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        HWHFuncs.setProgress('AOC: Recordings exported!', true);
+    }
+
+    function importRecordings() {
+        const { HWHFuncs } = window;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = readerEvent => {
+                try {
+                    const importedData = JSON.parse(readerEvent.target.result);
+                    
+                    if (!importedData.recordings || !Array.isArray(importedData.recordings)) {
+                        throw new Error('Invalid file structure');
+                    }
+                    
+                    const validRecordings = importedData.recordings.filter(rec => 
+                        rec && rec.id && rec.apiCalls && Array.isArray(rec.apiCalls)
+                    );
+                    
+                    if (validRecordings.length === 0) {
+                        throw new Error('No valid recordings found in file');
+                    }
+                    
+                    const existingIds = new Set(recordings.map(rec => rec.id));
+                    let addedCount = 0;
+                    let duplicateCount = 0;
+                    let idCounter = 0;
+                    
+                    validRecordings.forEach(importedRec => {
+                        let recToAdd = importedRec;
+                        
+                        if (existingIds.has(importedRec.id)) {
+                            duplicateCount++;
+                            recToAdd = { ...importedRec };
+                            recToAdd.id = (Date.now() + idCounter).toString() + '_' + Math.random().toString(36).substr(2, 9);
+                            idCounter++;
+                            while (existingIds.has(recToAdd.id)) {
+                                recToAdd.id = (Date.now() + idCounter).toString() + '_' + Math.random().toString(36).substr(2, 9);
+                                idCounter++;
+                            }
+                        }
+                        
+                        recordings.push(recToAdd);
+                        existingIds.add(recToAdd.id);
+                        addedCount++;
+                    });
+                    
+                    saveRecordings();
+                    
+                    let message = `AOC: Imported ${addedCount} item(s)`;
+                    if (duplicateCount > 0) {
+                        message += ` (${duplicateCount} assigned new IDs due to duplicates)`;
+                    }
+                    message += `!`;
+                    HWHFuncs.setProgress(message, true);
+                    
+                    const popup = document.getElementById('aoc-popup-container');
+                    if (popup) {
+                        popup.remove();
+                        openMainPopup();
+                    }
+                } catch (err) {
+                    alert('Error importing file: ' + err.message);
+                    console.error('AOC: Import error:', err);
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+        };
+        input.click();
     }
 
     // Start initialization
