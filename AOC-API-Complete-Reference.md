@@ -569,8 +569,8 @@ Tower positions are locations that can be occupied. When moving to a tower:
 - If `userId` matches your clan: Tower is occupied by teammate, skip
 - If `userId` is different clan: Tower is occupied by enemy, attack first
 
-Common tower positions include:
-`1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 333, 340, 356, 359, 375, 378, 407, 423, 426, 436, 446, 449, 465, 585, 588, 596`
+**All 32 Tower Positions:**
+`1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596`
 
 ---
 
@@ -582,27 +582,11 @@ Common tower positions include:
 
 **Path:** `693 → 603 → 519 → 441 → 369 → 303 → 249 → 201 → 159 → 153 → 111 → 75 → 51 → 45 → 21 → 9 → 3 → 1`
 
-**Sequence:**
-1. Move to level 603
-2. Move to level 519
-3. Move to level 441
-4. Move to level 369
-5. Move to level 303
-6. Move to level 249
-7. Move to level 201
-8. Move to level 159
-9. Move to level 153
-10. Move to level 111
-11. Move to level 75
-12. Move to level 51
-13. Move to level 45
-14. Move to level 21
-15. Move to level 9
-16. Move to level 3
-17. Move to level 1 (midtown)
-18. Get enemy teams at level 1
-19. Start battle with target ID
-20. Move into midtown after battle
+**API Sequence:**
+- 16 `clanDomination_move` calls (levels: 603, 519, 441, 369, 303, 249, 201, 159, 153, 111, 75, 51, 45, 21, 9, 3)
+- 1 `clanDomination_move` to level 1 (midtown)
+- 1 `clanDomination_getEnemyTeams` at level 1
+- 1 `clanDomination_startBattle` with target ID
 
 ---
 
@@ -612,24 +596,11 @@ Common tower positions include:
 
 **Path:** `696 → 606 → 522 → 444 → 372 → 306 → 246 → 192 → 144 → 108 → 78 → 54 → 30 → 12 → 6 → 1`
 
-**Sequence:**
-1. Move to level 606
-2. Move to level 522
-3. Move to level 444
-4. Move to level 372
-5. Move to level 306
-6. Move to level 246
-7. Move to level 192
-8. Move to level 144
-9. Move to level 108
-10. Move to level 78
-11. Move to level 54
-12. Move to level 30
-13. Move to level 12
-14. Move to level 6 (adjacent to midtown)
-15. Get enemy teams at level 1
-16. Start battle with target ID
-17. Move into midtown (level 1) after battle
+**API Sequence:**
+- 14 `clanDomination_move` calls (levels: 606, 522, 444, 372, 306, 246, 192, 144, 108, 78, 54, 30, 12, 6)
+- 1 `clanDomination_getEnemyTeams` at level 1
+- 1 `clanDomination_startBattle` with target ID
+- 1 `clanDomination_move` to level 1 (midtown) after battle
 
 ---
 
@@ -683,12 +654,7 @@ When replaying a path and encountering a tower position:
 
 ---
 
-## Related Files
-
-- `library/AOC/Bottom2.json` - Recording: Right Bottom Base to Midtown
-- `library/AOC/Top1WalkToMidtown.json` - Recording: Left Upper Base to Midtown
-
 ---
 
-**Document Version:** 1.0  
+**Document Version:** 1.1  
 **Last Updated:** 2026-01-13
