@@ -1,0 +1,232 @@
+{
+  "recordings": [
+    {
+      "id": "1768284718172_rpbeqfxts",
+      "name": "Top1toCenter",
+      "description": "",
+      "createdAt": 1768284718172,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "initialPosition": 693,
+      "path": [
+        693,
+        603,
+        519,
+        441,
+        369,
+        303,
+        243,
+        189,
+        141,
+        105,
+        75,
+        51,
+        27,
+        9,
+        3
+      ],
+      "apiCalls": [
+        {
+          "name": "clanDomination_mapState",
+          "args": {},
+          "context": {
+            "actionTs": 74617
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 603
+          },
+          "context": {
+            "actionTs": 77988
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 519
+          },
+          "context": {
+            "actionTs": 79304
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 441
+          },
+          "context": {
+            "actionTs": 80920
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 369
+          },
+          "context": {
+            "actionTs": 82170
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 303
+          },
+          "context": {
+            "actionTs": 83454
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 243
+          },
+          "context": {
+            "actionTs": 88189
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 189
+          },
+          "context": {
+            "actionTs": 90154
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 141
+          },
+          "context": {
+            "actionTs": 93388
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 105
+          },
+          "context": {
+            "actionTs": 98138
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 75
+          },
+          "context": {
+            "actionTs": 100722
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 51
+          },
+          "context": {
+            "actionTs": 102572
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 27
+          },
+          "context": {
+            "actionTs": 104176
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 9
+          },
+          "context": {
+            "actionTs": 105605
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 3
+          },
+          "context": {
+            "actionTs": 107355
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_getEnemyTeams",
+          "args": {
+            "levelId": 1
+          },
+          "context": {
+            "actionTs": 1903517
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_startBattle",
+          "args": {
+            "targetId": "33709609"
+          },
+          "context": {
+            "actionTs": 1906067
+          },
+          "ident": "body",
+          "enemyIds": []
+        },
+        {
+          "name": "clanDomination_move",
+          "args": {
+            "levelId": 1
+          },
+          "context": {
+            "actionTs": 1914185
+          },
+          "ident": "body",
+          "enemyIds": []
+        }
+      ]
+    }
+  ],
+  "exportDate": "2026-01-13T06:14:18.644Z",
+  "version": "2.0.0"
+}
