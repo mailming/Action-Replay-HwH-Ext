@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AOC Auto Movement HwH Ext
 // @namespace    HeroWarsHelper.AOCAutoMovement
-// @version      2.1.1
+// @version      2.2.0
 // @description  Record and replay AOC movements with auto-run support
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -16,7 +16,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.1.1";
+    const EXTENSION_VERSION = "2.2.0";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -38,6 +38,7 @@
     let playAllAborted = false;
     let currentlyPlayingRecordingId = null;
     let recordingAborted = false;
+    let clanStats = null; // Store all clan stats: [{ clanId, clanName, power, serverId, coins }, ...]
 
     // --- STORAGE KEYS ---
     const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
@@ -53,7 +54,7 @@
     // --- TOWER POSITIONS ---
     // Tower positions extracted from townPositions in moveResponse.json, Moreresponse3.json, and moveResponse2.json
     const TOWER_POSITIONS = new Set([
-        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 333, 340, 356, 375, 378, 423, 426, 436, 446, 465, 585, 588, 596
+        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 333, 340, 356, 359, 375, 378, 407, 423, 426, 436, 446, 449, 465, 585, 588, 596
     ]);
 
     function shouldRecordAPICall(apiName) {
@@ -253,6 +254,7 @@
         updateButtonInterval = setInterval(updateRecordingButton, 500);
         updatePlayAllButton();
         scheduleAutoRuns();
+        loadClanStats(); // Load clan stats on initialization
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -637,6 +639,77 @@
         } catch (error) {
             console.error('AOC: Error getting map state:', error);
             return null;
+        }
+    }
+
+    async function loadClanStats() {
+        try {
+            const { Send } = window;
+            if (!Send) {
+                return;
+            }
+            
+            // Call clanDomination_stats
+            const statsResponse = await Send({
+                calls: [{
+                    name: 'clanDomination_stats',
+                    args: {},
+                    context: { actionTs: Math.floor(performance.now()) },
+                    ident: 'body'
+                }]
+            });
+            
+            if (!statsResponse || !statsResponse.results || statsResponse.results.length === 0) {
+                console.log('AOC: No stats response received');
+                return;
+            }
+            
+            const result = statsResponse.results.find(r => r.ident === 'body');
+            if (!result || !result.result || !result.result.response) {
+                console.log('AOC: Invalid stats response structure');
+                return;
+            }
+            
+            const stats = result.result.response;
+            
+            // Get clan names from mapState
+            const mapState = await getMapState();
+            const clansMap = mapState && mapState.clans ? mapState.clans : {};
+            
+            // Build array of all clans with their stats
+            const allClans = [];
+            for (const [clanId, clanData] of Object.entries(stats)) {
+                let clanName = clanId; // Default to ID if name not found
+                let serverId = null;
+                
+                if (clansMap[clanId]) {
+                    if (clansMap[clanId].title) {
+                        clanName = clansMap[clanId].title;
+                    }
+                    if (clansMap[clanId].serverId) {
+                        serverId = clansMap[clanId].serverId;
+                    }
+                }
+                
+                allClans.push({
+                    clanId: clanId,
+                    clanName: clanName,
+                    power: clanData.power || 0,
+                    serverId: serverId,
+                    coins: clanData.coins || 0
+                });
+            }
+            
+            // Sort by power (descending)
+            allClans.sort((a, b) => b.power - a.power);
+            
+            // Store all clan stats
+            clanStats = allClans;
+            
+            console.log(`AOC: Loaded stats for ${allClans.length} clans`);
+        } catch (error) {
+            console.error('AOC: Error loading clan stats:', error);
+            clanStats = null;
         }
     }
 
@@ -1449,8 +1522,23 @@
             .aoc-drag-handle:active { cursor: grabbing; }
             .aoc-call-delete { color: #ff6b6b; cursor: pointer; margin-left: 8px; font-size: 14px; padding: 2px 6px; }
             .aoc-call-delete:hover { color: #ff4444; transform: scale(1.2); }
-            .aoc-donate-section { display: flex; gap: 10px; align-items: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; margin-top: 10px; }
+            .aoc-donate-section { display: flex; gap: 10px; align-items: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; margin-bottom: 15px; }
             .aoc-donate-input { width: 80px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center; font-size: 14px; }
+            .aoc-clan-stats { padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; margin-bottom: 15px; border: 1px solid #ce9767; }
+            .aoc-clan-stats-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+            .aoc-clan-stats-title { font-weight: bold; color: #ffd700; font-size: 12px; }
+            .aoc-clan-stats-refresh { cursor: pointer; color: #aaa; font-size: 11px; padding: 3px 6px; background: rgba(0,0,0,0.3); border: 1px solid #ce9767; border-radius: 3px; }
+            .aoc-clan-stats-refresh:hover { color: #fce1ac; background: rgba(0,0,0,0.5); }
+            .aoc-clan-stats-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            .aoc-clan-stats-table th { background: rgba(0,0,0,0.4); color: #ffd700; padding: 4px 6px; text-align: left; border-bottom: 1px solid #ce9767; font-size: 10px; font-weight: bold; }
+            .aoc-clan-stats-table td { padding: 3px 6px; border-bottom: 1px solid #4a3422; color: #fce1ac; font-size: 10px; }
+            .aoc-clan-stats-table tr:hover { background: rgba(0,0,0,0.2); }
+            .aoc-clan-stats-table .clan-id { color: #aaa; font-size: 10px; }
+            .aoc-clan-stats-table .clan-name { color: #fce1ac; font-size: 10px; }
+            .aoc-clan-stats-table .clan-server { color: #aaa; font-size: 10px; text-align: center; }
+            .aoc-clan-stats-table .clan-coins { color: #FFD700; font-size: 10px; text-align: right; }
+            .aoc-clan-stats-table .clan-power { color: #4CAF50; font-size: 10px; text-align: right; }
+            .aoc-clan-stats-loading { color: #aaa; font-style: italic; font-size: 11px; }
         `;
         
         const styleSheet = document.createElement("style");
@@ -1467,20 +1555,74 @@
         const recordingStatus = isRecording ? '🔴 Recording' : '⚪ Stopped';
         const recordingStatusClass = isRecording ? 'aoc-status-recording' : '';
         
+        // Format clan stats for display
+        let clanStatsHtml = '';
+        if (clanStats && clanStats.length > 0) {
+            let tableRows = '';
+            clanStats.forEach(clan => {
+                const powerFormatted = clan.power !== null ? clan.power.toLocaleString() : 'N/A';
+                const coinsFormatted = clan.coins !== null ? clan.coins.toLocaleString() : 'N/A';
+                const serverId = clan.serverId || 'N/A';
+                tableRows += `
+                    <tr>
+                        <td class="clan-id">${clan.clanId}</td>
+                        <td class="clan-name">${clan.clanName}</td>
+                        <td class="clan-server">${serverId}</td>
+                        <td class="clan-coins">${coinsFormatted}</td>
+                        <td class="clan-power">${powerFormatted}</td>
+                    </tr>
+                `;
+            });
+            
+            clanStatsHtml = `
+                <div class="aoc-clan-stats" id="clan-stats-section">
+                    <div class="aoc-clan-stats-header">
+                        <div class="aoc-clan-stats-title">Clan Stats (${clanStats.length} clans)</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-clan-stats-btn" title="Refresh clan stats">🔄 Refresh</button>
+                    </div>
+                    <table class="aoc-clan-stats-table">
+                        <thead>
+                            <tr>
+                                <th>Clan ID</th>
+                                <th>Clan Name</th>
+                                <th style="text-align: center;">Server</th>
+                                <th style="text-align: right;">Coins</th>
+                                <th style="text-align: right;">Power</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            clanStatsHtml = `
+                <div class="aoc-clan-stats" id="clan-stats-section">
+                    <div class="aoc-clan-stats-header">
+                        <div class="aoc-clan-stats-title">Clan Stats</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-clan-stats-btn" title="Load clan stats">🔄 Load</button>
+                    </div>
+                    <div class="aoc-clan-stats-loading">Clan stats not loaded. Click "Load" to fetch stats.</div>
+                </div>
+            `;
+        }
+        
         popup.innerHTML = `
             <button class="aoc-close-btn">&times;</button>
             <h2>AOC Auto Movement</h2>
+            ${clanStatsHtml}
+            <div class="aoc-donate-section">
+                <label style="color: #fce1ac; font-weight: bold;">Donate Coins:</label>
+                <input type="number" id="donate-amount-input" class="aoc-donate-input" min="1" value="1" title="Amount of coins to donate">
+                <button id="donate-point-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #FF9800; border-radius: 5px;">💰 Donate</button>
+            </div>
             <div class="aoc-controls">
                 <button id="start-recording-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: ${isRecording ? '#ff4444' : '#4CAF50'}; border-radius: 5px;">
                     ${isRecording ? '⏹ Stop Recording' : '⏺ Start Recording'}
                 </button>
                 <span class="aoc-status-badge ${recordingStatusClass}">${recordingStatus}</span>
                 <span style="margin-left: auto; color: #aaa;">Captured: ${recordingBuffer.length} moves</span>
-            </div>
-            <div class="aoc-donate-section">
-                <label style="color: #fce1ac; font-weight: bold;">DonatePoint:</label>
-                <input type="number" id="donate-amount-input" class="aoc-donate-input" min="1" value="1" title="Amount to donate">
-                <button id="donate-point-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #FF9800; border-radius: 5px;">💰 Donate</button>
             </div>
             <div>
                 <h3 style="margin-top: 0; border-bottom: 1px solid #4a3422; padding-bottom: 5px;">Saved Recordings (${recordings.length})</h3>
@@ -1497,6 +1639,82 @@
         document.body.appendChild(backdrop);
         
         populateRecordingsList();
+        
+        // Add refresh button event listener
+        const refreshClanStats = async () => {
+            const refreshBtn = document.getElementById('refresh-clan-stats-btn');
+            if (!refreshBtn) return;
+            
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⏳ Loading...';
+            await loadClanStats();
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = '🔄 Refresh';
+            
+            // Update the stats display
+            const statsSection = document.getElementById('clan-stats-section');
+            if (statsSection && clanStats && clanStats.length > 0) {
+                let tableRows = '';
+                clanStats.forEach(clan => {
+                    const powerFormatted = clan.power !== null ? clan.power.toLocaleString() : 'N/A';
+                    const coinsFormatted = clan.coins !== null ? clan.coins.toLocaleString() : 'N/A';
+                    const serverId = clan.serverId || 'N/A';
+                    tableRows += `
+                        <tr>
+                            <td class="clan-id">${clan.clanId}</td>
+                            <td class="clan-name">${clan.clanName}</td>
+                            <td class="clan-server">${serverId}</td>
+                            <td class="clan-coins">${coinsFormatted}</td>
+                            <td class="clan-power">${powerFormatted}</td>
+                        </tr>
+                    `;
+                });
+                
+                statsSection.innerHTML = `
+                    <div class="aoc-clan-stats-header">
+                        <div class="aoc-clan-stats-title">Clan Stats (${clanStats.length} clans)</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-clan-stats-btn" title="Refresh clan stats">🔄 Refresh</button>
+                    </div>
+                    <table class="aoc-clan-stats-table">
+                        <thead>
+                            <tr>
+                                <th>Clan ID</th>
+                                <th>Clan Name</th>
+                                <th style="text-align: center;">Server</th>
+                                <th style="text-align: right;">Coins</th>
+                                <th style="text-align: right;">Power</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                `;
+                // Re-attach event listener
+                const newRefreshBtn = document.getElementById('refresh-clan-stats-btn');
+                if (newRefreshBtn) {
+                    newRefreshBtn.addEventListener('click', refreshClanStats);
+                }
+            } else if (statsSection && (!clanStats || clanStats.length === 0)) {
+                statsSection.innerHTML = `
+                    <div class="aoc-clan-stats-header">
+                        <div class="aoc-clan-stats-title">Clan Stats</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-clan-stats-btn" title="Load clan stats">🔄 Load</button>
+                    </div>
+                    <div class="aoc-clan-stats-loading">Clan stats not loaded. Click "Load" to fetch stats.</div>
+                `;
+                // Re-attach event listener
+                const newRefreshBtn = document.getElementById('refresh-clan-stats-btn');
+                if (newRefreshBtn) {
+                    newRefreshBtn.addEventListener('click', refreshClanStats);
+                }
+            }
+        };
+        
+        const refreshBtn = document.getElementById('refresh-clan-stats-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', refreshClanStats);
+        }
         
         backdrop.addEventListener('click', (e) => {
             if (e.target === backdrop || e.target.classList.contains('aoc-close-btn')) {
@@ -1544,7 +1762,7 @@
         }
         
         try {
-            HWHFuncs.setProgress(`AOC: Donating ${amount} points...`, false);
+            HWHFuncs.setProgress(`AOC: Donating ${amount} coins...`, false);
             
             const response = await Send({
                 calls: [{
@@ -1572,21 +1790,21 @@
                         if (clanCastle) {
                             const userExp = clanCastle.userExp || 0;
                             const castleLevel = clanCastle.castleLevel || 0;
-                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points! Your total contribution: ${userExp}. Castle level: ${castleLevel}`, true);
+                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} coins! Your total contribution: ${userExp}. Castle level: ${castleLevel}`, true);
                         } else {
-                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} coins!`, true);
                         }
                     } else {
-                        HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                        HWHFuncs.setProgress(`AOC: Successfully donated ${amount} coins!`, true);
                     }
                 } else {
-                    HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                    HWHFuncs.setProgress(`AOC: Successfully donated ${amount} coins!`, true);
                 }
             } else {
-                HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                HWHFuncs.setProgress(`AOC: Successfully donated ${amount} coins!`, true);
             }
         } catch (error) {
-            HWHFuncs.setProgress(`AOC: Error donating points: ${error.message || String(error)}`, true);
+            HWHFuncs.setProgress(`AOC: Error donating coins: ${error.message || String(error)}`, true);
             console.error('AOC: Donate error:', error);
         }
     }
