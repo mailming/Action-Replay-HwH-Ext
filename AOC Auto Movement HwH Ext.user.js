@@ -50,6 +50,12 @@
         'clanDomination_mapState'
     ]);
 
+    // --- TOWER POSITIONS ---
+    // Tower positions extracted from townPositions in moveResponse.json and Moreresponse3.json
+    const TOWER_POSITIONS = new Set([
+        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 340, 375, 378, 423, 426, 436, 465, 585, 588
+    ]);
+
     function shouldRecordAPICall(apiName) {
         if (!apiName || typeof apiName !== 'string') return false;
         return AOC_API_CALLS.has(apiName);
@@ -688,6 +694,85 @@
         }
     }
 
+    // --- TOWER POSITION HELPER FUNCTIONS ---
+    function getPlayerClanId() {
+        try {
+            if (window.HWHFuncs && window.HWHFuncs.getUserInfo) {
+                const userInfo = window.HWHFuncs.getUserInfo();
+                if (userInfo && userInfo.clanId) {
+                    return String(userInfo.clanId);
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('AOC: Error getting player clan ID:', error);
+            return null;
+        }
+    }
+
+    function isTeammate(userId, mapState) {
+        try {
+            if (!userId || !mapState || !mapState.users) {
+                return false;
+            }
+            
+            const playerClanId = getPlayerClanId();
+            if (!playerClanId) {
+                return false;
+            }
+            
+            const userIdStr = String(userId);
+            
+            // Iterate through all clans in mapState.users to find the user
+            for (const clanId in mapState.users) {
+                if (mapState.users[clanId] && mapState.users[clanId][userIdStr]) {
+                    const user = mapState.users[clanId][userIdStr];
+                    if (user && user.clanId) {
+                        return String(user.clanId) === playerClanId;
+                    }
+                }
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('AOC: Error checking if teammate:', error);
+            return false;
+        }
+    }
+
+    function isTowerPosition(levelId) {
+        if (levelId === null || levelId === undefined) {
+            return false;
+        }
+        return TOWER_POSITIONS.has(Number(levelId));
+    }
+
+    function getTowerInfo(levelId, mapState) {
+        try {
+            if (!levelId || !mapState || !mapState.townPositions) {
+                return null;
+            }
+            
+            const levelIdStr = String(levelId);
+            const towerInfo = mapState.townPositions[levelIdStr];
+            
+            if (towerInfo) {
+                return {
+                    position: towerInfo.position,
+                    status: towerInfo.status,
+                    userId: towerInfo.userId,
+                    townId: towerInfo.townId,
+                    farmStart: towerInfo.farmStart
+                };
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('AOC: Error getting tower info:', error);
+            return null;
+        }
+    }
+
     async function executeRecordingInternal(recording) {
         const { Send, HWHFuncs } = window;
         
@@ -823,6 +908,165 @@
                 const call = recording.apiCalls[i];
                 
                 try {
+                    // Check if this is a move to a tower position
+                    if (call.name === 'clanDomination_move' && call.args && call.args.levelId) {
+                        const targetLevelId = call.args.levelId;
+                        
+                        if (isTowerPosition(targetLevelId)) {
+                            // Get current map state to check tower occupancy
+                            const mapState = await getMapState();
+                            if (!mapState) {
+                                HWHFuncs.setProgress(`AOC: ${recording.name} - Cannot get map state for tower check, executing move normally`, false);
+                                // Fall through to normal execution
+                            } else {
+                                const towerInfo = getTowerInfo(targetLevelId, mapState);
+                                
+                                if (!towerInfo) {
+                                    HWHFuncs.setProgress(`AOC: ${recording.name} - Tower info not found for position ${targetLevelId}, executing move normally`, false);
+                                    // Fall through to normal execution
+                                } else {
+                                    const towerUserId = towerInfo.userId;
+                                    
+                                    // Case 1: Empty tower (userId === 0)
+                                    if (towerUserId === 0 || towerUserId === null || towerUserId === undefined) {
+                                        const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Tower at position ${targetLevelId} is empty, moving to position`;
+                                        console.log(logMsg);
+                                        HWHFuncs.setProgress(logMsg, false);
+                                        // Continue to normal move execution below
+                                    }
+                                    // Case 2: Occupied by teammate
+                                    else if (isTeammate(towerUserId, mapState)) {
+                                        const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Tower at position ${targetLevelId} occupied by teammate (userId: ${towerUserId}), skipping move`;
+                                        console.log(logMsg);
+                                        HWHFuncs.setProgress(logMsg, false);
+                                        // Skip this move and continue to next call
+                                        continue;
+                                    }
+                                    // Case 3: Occupied by enemy
+                                    else {
+                                        const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Tower at position ${targetLevelId} occupied by enemy (userId: ${towerUserId}), attacking`;
+                                        console.log(logMsg);
+                                        HWHFuncs.setProgress(logMsg, false);
+                                        
+                                        try {
+                                            // Call getEnemyTeams to get enemy IDs
+                                            console.log(`AOC: ${recording.name} - [Step ${i + 1}] Calling clanDomination_getEnemyTeams for level ${targetLevelId}`);
+                                            const enemyTeamsResponse = await Send({
+                                                calls: [{
+                                                    name: 'clanDomination_getEnemyTeams',
+                                                    args: { levelId: targetLevelId },
+                                                    context: { actionTs: Math.floor(performance.now()) },
+                                                    ident: 'body'
+                                                }]
+                                            });
+                                            
+                                            // Extract enemy IDs from response
+                                            let enemyIds = [];
+                                            if (enemyTeamsResponse && enemyTeamsResponse.results && enemyTeamsResponse.results.length > 0) {
+                                                const result = enemyTeamsResponse.results.find(r => r.ident === 'body');
+                                                if (result && result.result && result.result.response && Array.isArray(result.result.response)) {
+                                                    enemyIds = result.result.response.map(enemy => enemy.userId).filter(id => id != null);
+                                                }
+                                            }
+                                            
+                                            // If no enemy IDs found from getEnemyTeams, use the tower's userId
+                                            if (enemyIds.length === 0) {
+                                                enemyIds = [towerUserId];
+                                            }
+                                            
+                                            // Call startBattle with the first enemy ID
+                                            if (enemyIds.length > 0) {
+                                                const targetEnemyId = enemyIds[0];
+                                                const battleLogMsg = `AOC: ${recording.name} - [Step ${i + 1}] Attacking enemy ${targetEnemyId} at tower position ${targetLevelId}`;
+                                                console.log(battleLogMsg);
+                                                HWHFuncs.setProgress(battleLogMsg, false);
+                                                
+                                                const battleResponse = await Send({
+                                                    calls: [{
+                                                        name: 'clanDomination_startBattle',
+                                                        args: { targetId: String(targetEnemyId) },
+                                                        context: { actionTs: Math.floor(performance.now()) },
+                                                        ident: 'body'
+                                                    }]
+                                                });
+                                                
+                                                // Check for battle errors and log response
+                                                if (battleResponse && battleResponse.results && battleResponse.results.length > 0) {
+                                                    const battleResult = battleResponse.results.find(r => r.ident === 'body');
+                                                    if (battleResult && battleResult.result) {
+                                                        if (battleResult.result.error) {
+                                                            const error = battleResult.result.error;
+                                                            const errorDetails = {
+                                                                name: error.name || 'Unknown',
+                                                                description: error.description || 'No description',
+                                                                code: error.code || null,
+                                                                data: error.data || null
+                                                            };
+                                                            const errorMsg = `Battle Error: ${errorDetails.name} - ${errorDetails.description}${errorDetails.code ? ` (Code: ${errorDetails.code})` : ''}`;
+                                                            const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
+                                                            console.error(fullErrorMsg);
+                                                            console.error('AOC: Full battle error response:', JSON.stringify(error, null, 2));
+                                                            HWHFuncs.setProgress(fullErrorMsg, false);
+                                                            
+                                                            // Log additional error data if available
+                                                            if (errorDetails.data) {
+                                                                console.error('AOC: Battle error data:', JSON.stringify(errorDetails.data, null, 2));
+                                                            }
+                                                            totalFailureCount++;
+                                                        } else {
+                                                            const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully against enemy ${targetEnemyId}`;
+                                                            console.log(successMsg);
+                                                            // Log battle response details
+                                                            if (battleResult.result.response) {
+                                                                console.log('AOC: Battle response:', JSON.stringify(battleResult.result.response, null, 2));
+                                                            }
+                                                            HWHFuncs.setProgress(successMsg, false);
+                                                            totalSuccessCount++;
+                                                        }
+                                                    } else {
+                                                        const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: Unexpected battle response structure`;
+                                                        console.warn(warningMsg);
+                                                        console.warn('AOC: Battle response:', JSON.stringify(battleResponse, null, 2));
+                                                        totalSuccessCount++;
+                                                    }
+                                                } else {
+                                                    const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: No results in battle response`;
+                                                    console.warn(warningMsg);
+                                                    console.warn('AOC: Battle response:', JSON.stringify(battleResponse, null, 2));
+                                                    const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully against enemy ${targetEnemyId}`;
+                                                    console.log(successMsg);
+                                                    HWHFuncs.setProgress(successMsg, false);
+                                                    totalSuccessCount++;
+                                                }
+                                                
+                                                // Wait 5 seconds cooldown after battle before moving into tower
+                                                const cooldownMsg = `AOC: ${recording.name} - [Step ${i + 1}] Waiting 5 seconds cooldown after battle, then moving into tower...`;
+                                                console.log(cooldownMsg);
+                                                HWHFuncs.setProgress(cooldownMsg, false);
+                                                await new Promise(resolve => setTimeout(resolve, 5000));
+                                                
+                                                // After battle and cooldown, continue to execute the move to occupy the tower
+                                                // Don't skip - let it fall through to execute the move normally
+                                                const moveAfterBattleMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle complete, now moving into tower at position ${targetLevelId}`;
+                                                console.log(moveAfterBattleMsg);
+                                                HWHFuncs.setProgress(moveAfterBattleMsg, false);
+                                            } else {
+                                                const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] No enemy IDs found, executing move normally`;
+                                                console.log(logMsg);
+                                                HWHFuncs.setProgress(logMsg, false);
+                                                // Fall through to normal execution
+                                            }
+                                        } catch (battleError) {
+                                            console.error(`AOC: ${recording.name} - [Step ${i + 1}] Error during tower attack at position ${targetLevelId}:`, battleError);
+                                            HWHFuncs.setProgress(`AOC: ${recording.name} - Error attacking tower, executing move normally`, false);
+                                            // Fall through to normal execution
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
                     let callToExecute = {
                         name: call.name,
                         args: call.args,
@@ -853,43 +1097,143 @@
                         }
                     }
 
+                    // Log the action being executed
+                    let actionLogMsg = `AOC: ${recording.name} - [Step ${i + 1}/${recording.apiCalls.length}] Executing: ${call.name}`;
+                    if (call.name === 'clanDomination_move' && call.args && call.args.levelId) {
+                        actionLogMsg += ` → Level ${call.args.levelId}`;
+                    } else if (call.name === 'clanDomination_getEnemyTeams' && call.args && call.args.levelId) {
+                        actionLogMsg += ` (Level ${call.args.levelId})`;
+                    } else if (call.name === 'clanDomination_startBattle' && call.args && call.args.targetId) {
+                        actionLogMsg += ` (Target: ${call.args.targetId})`;
+                    }
+                    console.log(actionLogMsg);
+                    HWHFuncs.setProgress(actionLogMsg, false);
+                    
                     const response = await Send({ calls: [callToExecute] });
                     
-                    // Capture enemy IDs from getEnemyTeams response
-                    if (call.name === 'clanDomination_getEnemyTeams' && response && response.results && response.results.length > 0) {
-                        const result = response.results.find(r => r.ident === 'body');
-                        if (result && result.result && result.result.response && Array.isArray(result.result.response)) {
-                            lastEnemyIds = result.result.response.map(enemy => enemy.userId).filter(id => id != null);
-                            if (lastEnemyIds.length > 0) {
-                                HWHFuncs.setProgress(`AOC: Captured ${lastEnemyIds.length} enemy ID(s): ${lastEnemyIds.join(', ')}`, false);
-                            }
-                        }
-                    }
-                    
-                    // Check for remaining moves from move API response and stop if 0
-                    if (call.name === 'clanDomination_move') {
-                        const remainingMoves = getRemainingMovesFromResponse(response);
-                        if (remainingMoves !== null && remainingMoves === 0) {
-                            const message = 'AOC: No moves remaining (0). Stopping all recordings.';
-                            HWHFuncs.setProgress(message, true);
-                            console.log(message);
-                            playAllAborted = true; // Stop all further playback
-                            return;
-                        }
-                    }
-                    
-                    // Check for API errors
+                    // Log response details
                     if (response && response.results && response.results.length > 0) {
                         const result = response.results.find(r => r.ident === 'body');
-                        if (result && result.result && result.result.error) {
-                            const errorMsg = `API Error: ${result.result.error.name || 'Unknown'} - ${result.result.error.description || 'No description'}`;
-                            totalFailureCount++;
-                            console.error(`AOC: Step ${i + 1}/${recording.apiCalls.length} (${call.name}) failed:`, errorMsg);
+                        if (result && result.result) {
+                            // Check for errors first
+                            if (result.result.error) {
+                                const error = result.result.error;
+                                const errorDetails = {
+                                    name: error.name || 'Unknown',
+                                    description: error.description || 'No description',
+                                    code: error.code || null,
+                                    data: error.data || null
+                                };
+                                const errorMsg = `API Error: ${errorDetails.name} - ${errorDetails.description}${errorDetails.code ? ` (Code: ${errorDetails.code})` : ''}`;
+                                const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
+                                console.error(fullErrorMsg);
+                                console.error('AOC: Full error response:', JSON.stringify(error, null, 2));
+                                HWHFuncs.setProgress(fullErrorMsg, false);
+                                
+                                // Log additional error data if available
+                                if (errorDetails.data) {
+                                    console.error('AOC: Error data:', JSON.stringify(errorDetails.data, null, 2));
+                                }
+                            } else if (result.result.response) {
+                                // Log successful response summary
+                                const responseSummary = `AOC: ${recording.name} - [Step ${i + 1}] Response received for ${call.name}`;
+                                console.log(responseSummary);
+                                
+                                // Log response details for specific API calls
+                                if (call.name === 'clanDomination_move') {
+                                    const moveResponse = result.result.response;
+                                    if (moveResponse.refillable) {
+                                        const remainingMoves = moveResponse.refillable.amount;
+                                        const moveLogMsg = `AOC: ${recording.name} - [Step ${i + 1}] Move response: Remaining moves: ${remainingMoves}`;
+                                        console.log(moveLogMsg);
+                                        HWHFuncs.setProgress(moveLogMsg, false);
+                                        
+                                        if (remainingMoves === 0) {
+                                            const message = `AOC: ${recording.name} - [Step ${i + 1}] No moves remaining (0). Stopping all recordings.`;
+                                            console.log(message);
+                                            HWHFuncs.setProgress(message, true);
+                                            playAllAborted = true;
+                                            return;
+                                        }
+                                    }
+                                    // Log full move response for debugging
+                                    console.log('AOC: Move response:', JSON.stringify(moveResponse, null, 2));
+                                } else if (call.name === 'clanDomination_getEnemyTeams') {
+                                    const enemyResponse = result.result.response;
+                                    if (Array.isArray(enemyResponse)) {
+                                        lastEnemyIds = enemyResponse.map(enemy => enemy.userId).filter(id => id != null);
+                                        if (lastEnemyIds.length > 0) {
+                                            const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Captured ${lastEnemyIds.length} enemy ID(s): ${lastEnemyIds.join(', ')}`;
+                                            console.log(logMsg);
+                                            HWHFuncs.setProgress(logMsg, false);
+                                        }
+                                        // Log full enemy teams response
+                                        console.log('AOC: Enemy teams response:', JSON.stringify(enemyResponse, null, 2));
+                                    }
+                                } else if (call.name === 'clanDomination_startBattle') {
+                                    const battleResponse = result.result.response;
+                                    const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully`;
+                                    console.log(successMsg);
+                                    // Log battle response summary
+                                    if (battleResponse && typeof battleResponse === 'object') {
+                                        console.log('AOC: Battle response summary:', JSON.stringify(battleResponse, null, 2));
+                                    }
+                                    HWHFuncs.setProgress(successMsg, false);
+                                } else if (call.name === 'clanDomination_mapState') {
+                                    const mapStateResponse = result.result.response;
+                                    console.log('AOC: Map state response received');
+                                    // Optionally log map state summary
+                                    if (mapStateResponse && typeof mapStateResponse === 'object') {
+                                        const summary = {
+                                            userPositions: mapStateResponse.userPositions ? Object.keys(mapStateResponse.userPositions).length : 0,
+                                            townPositions: mapStateResponse.townPositions ? Object.keys(mapStateResponse.townPositions).length : 0
+                                        };
+                                        console.log('AOC: Map state summary:', JSON.stringify(summary, null, 2));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // No response or unexpected response structure
+                        const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: Unexpected response structure for ${call.name}`;
+                        console.warn(warningMsg);
+                        console.warn('AOC: Response:', JSON.stringify(response, null, 2));
+                    }
+                    
+                    // Check if this was a battle and add cooldown
+                    if (call.name === 'clanDomination_startBattle') {
+                        let battleSuccess = true;
+                        if (response && response.results && response.results.length > 0) {
+                            const result = response.results.find(r => r.ident === 'body');
+                            if (result && result.result && result.result.error) {
+                                battleSuccess = false;
+                                totalFailureCount++;
+                            } else {
+                                totalSuccessCount++;
+                            }
                         } else {
                             totalSuccessCount++;
                         }
+                        
+                        // Wait 5 seconds cooldown after battle before next move
+                        if (battleSuccess) {
+                            const cooldownMsg = `AOC: ${recording.name} - [Step ${i + 1}] Waiting 5 seconds cooldown after battle...`;
+                            console.log(cooldownMsg);
+                            HWHFuncs.setProgress(cooldownMsg, false);
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        }
                     } else {
-                        totalSuccessCount++;
+                        // Update success/failure counts for non-battle calls
+                        if (response && response.results && response.results.length > 0) {
+                            const result = response.results.find(r => r.ident === 'body');
+                            if (result && result.result && result.result.error) {
+                                totalFailureCount++;
+                            } else {
+                                totalSuccessCount++;
+                            }
+                        } else {
+                            totalSuccessCount++;
+                        }
                     }
                     
                 } catch (e) {
