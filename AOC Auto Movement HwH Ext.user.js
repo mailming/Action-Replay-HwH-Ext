@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AOC Auto Movement HwH Ext
 // @namespace    HeroWarsHelper.AOCAutoMovement
-// @version      2.0.0
+// @version      2.0.1
 // @description  Record and replay AOC movements with auto-run support
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -16,7 +16,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.0.0";
+    const EXTENSION_VERSION = "2.0.1";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -333,6 +333,11 @@
     function toggleRecording() {
         if (isRecording) {
             stopRecording();
+            // Close main popup if open before showing create popup
+            const mainPopup = document.getElementById('aoc-popup-container');
+            if (mainPopup) {
+                mainPopup.remove();
+            }
             setTimeout(() => {
                 if (recordingBuffer.length > 0) {
                     openCreateRecordingPopup();
@@ -340,7 +345,7 @@
                     const { HWHFuncs } = window;
                     HWHFuncs.setProgress('AOC: No AOC moves captured', true);
                 }
-            }, 50);
+            }, 100);
         } else {
             startRecording();
         }
@@ -1399,6 +1404,12 @@
     async function openCreateRecordingPopup() {
         const { HWHFuncs } = window;
         
+        // Close main popup if it's open
+        const mainPopup = document.getElementById('aoc-popup-container');
+        if (mainPopup) {
+            mainPopup.remove();
+        }
+        
         const existingPopup = document.getElementById('aoc-create-popup-container');
         if (existingPopup) {
             existingPopup.remove();
@@ -1407,6 +1418,20 @@
         if (recordingBuffer.length === 0) {
             HWHFuncs.setProgress('AOC: No moves captured', true);
             return;
+        }
+        
+        // Ensure styles are available (in case main popup hasn't been opened yet)
+        if (!document.getElementById('aoc-popup-styles')) {
+            const styles = `
+                .aoc-popup-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10001; }
+                .aoc-popup-main { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #190e08e6; border: 3px #ce9767 solid; border-radius: 10px; z-index: 10002; color: #fce1ac; padding: 20px; min-width: 500px; max-width: 1200px; max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+                .aoc-edit-popup-main { min-width: 500px !important; }
+                .aoc-close-btn { position: absolute; top: 5px; right: 10px; font-size: 24px; color: #ce9767; cursor: pointer; border: none; background: none; }
+            `;
+            const styleSheet = document.createElement("style");
+            styleSheet.id = 'aoc-popup-styles';
+            styleSheet.innerText = styles;
+            document.head.appendChild(styleSheet);
         }
         
         const backdrop = document.createElement('div');
