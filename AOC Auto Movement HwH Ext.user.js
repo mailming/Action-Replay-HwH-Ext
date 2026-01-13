@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AOC Auto Movement HwH Ext
 // @namespace    HeroWarsHelper.AOCAutoMovement
-// @version      2.0.1
+// @version      2.1.0
 // @description  Record and replay AOC movements with auto-run support
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -16,7 +16,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.0.1";
+    const EXTENSION_VERSION = "2.1.0";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -1052,6 +1052,8 @@
             .aoc-drag-handle:active { cursor: grabbing; }
             .aoc-call-delete { color: #ff6b6b; cursor: pointer; margin-left: 8px; font-size: 14px; padding: 2px 6px; }
             .aoc-call-delete:hover { color: #ff4444; transform: scale(1.2); }
+            .aoc-donate-section { display: flex; gap: 10px; align-items: center; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; margin-top: 10px; }
+            .aoc-donate-input { width: 80px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center; font-size: 14px; }
         `;
         
         const styleSheet = document.createElement("style");
@@ -1077,6 +1079,11 @@
                 </button>
                 <span class="aoc-status-badge ${recordingStatusClass}">${recordingStatus}</span>
                 <span style="margin-left: auto; color: #aaa;">Captured: ${recordingBuffer.length} moves</span>
+            </div>
+            <div class="aoc-donate-section">
+                <label style="color: #fce1ac; font-weight: bold;">DonatePoint:</label>
+                <input type="number" id="donate-amount-input" class="aoc-donate-input" min="1" value="1" title="Amount to donate">
+                <button id="donate-point-btn" class="aoc-btn" style="font-size: 16px; padding: 8px 15px; background: #FF9800; border-radius: 5px;">💰 Donate</button>
             </div>
             <div>
                 <h3 style="margin-top: 0; border-bottom: 1px solid #4a3422; padding-bottom: 5px;">Saved Recordings (${recordings.length})</h3>
@@ -1121,6 +1128,70 @@
         document.getElementById('export-btn').addEventListener('click', exportRecordings);
         document.getElementById('import-btn').addEventListener('click', importRecordings);
         document.getElementById('delete-all-btn').addEventListener('click', deleteAllRecordings);
+        document.getElementById('donate-point-btn').addEventListener('click', donatePoint);
+    }
+
+    async function donatePoint() {
+        const { Send, HWHFuncs } = window;
+        
+        const amountInput = document.getElementById('donate-amount-input');
+        if (!amountInput) {
+            HWHFuncs.setProgress('AOC: Donate input not found', true);
+            return;
+        }
+        
+        const amount = parseInt(amountInput.value) || 1;
+        if (amount < 1) {
+            HWHFuncs.setProgress('AOC: Amount must be at least 1', true);
+            return;
+        }
+        
+        try {
+            HWHFuncs.setProgress(`AOC: Donating ${amount} points...`, false);
+            
+            const response = await Send({
+                calls: [{
+                    name: 'clanCastle_upgrade',
+                    args: {
+                        optionId: 1,
+                        amount: amount
+                    },
+                    context: {
+                        actionTs: Math.floor(performance.now())
+                    },
+                    ident: 'body'
+                }]
+            });
+            
+            if (response && response.results && response.results.length > 0) {
+                const result = response.results.find(r => r.ident === 'body');
+                if (result && result.result) {
+                    if (result.result.error) {
+                        const errorMsg = `Error: ${result.result.error.name || 'Unknown'} - ${result.result.error.description || 'No description'}`;
+                        HWHFuncs.setProgress(`AOC: ${errorMsg}`, true);
+                        console.error('AOC: Donate error:', result.result.error);
+                    } else if (result.result.response) {
+                        const clanCastle = result.result.response.clanCastle;
+                        if (clanCastle) {
+                            const userExp = clanCastle.userExp || 0;
+                            const castleLevel = clanCastle.castleLevel || 0;
+                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points! Your total contribution: ${userExp}. Castle level: ${castleLevel}`, true);
+                        } else {
+                            HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                        }
+                    } else {
+                        HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                    }
+                } else {
+                    HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+                }
+            } else {
+                HWHFuncs.setProgress(`AOC: Successfully donated ${amount} points!`, true);
+            }
+        } catch (error) {
+            HWHFuncs.setProgress(`AOC: Error donating points: ${error.message || String(error)}`, true);
+            console.error('AOC: Donate error:', error);
+        }
     }
 
     function setupApiCallsDragDrop(recordingId, apiCalls) {
