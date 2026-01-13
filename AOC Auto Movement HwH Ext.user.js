@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AOC Auto Movement HwH Ext
 // @namespace    HeroWarsHelper.AOCAutoMovement
-// @version      2.1.0
+// @version      2.1.1
 // @description  Record and replay AOC movements with auto-run support
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -16,7 +16,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.1.0";
+    const EXTENSION_VERSION = "2.1.1";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -51,9 +51,9 @@
     ]);
 
     // --- TOWER POSITIONS ---
-    // Tower positions extracted from townPositions in moveResponse.json and Moreresponse3.json
+    // Tower positions extracted from townPositions in moveResponse.json, Moreresponse3.json, and moveResponse2.json
     const TOWER_POSITIONS = new Set([
-        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 340, 375, 378, 423, 426, 436, 465, 585, 588
+        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 333, 340, 356, 375, 378, 423, 426, 436, 446, 465, 585, 588, 596
     ]);
 
     function shouldRecordAPICall(apiName) {
@@ -916,13 +916,17 @@
                             // Get current map state to check tower occupancy
                             const mapState = await getMapState();
                             if (!mapState) {
-                                HWHFuncs.setProgress(`AOC: ${recording.name} - Cannot get map state for tower check, executing move normally`, false);
+                                const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Cannot get map state for tower check, executing move normally`;
+                                console.log(logMsg);
+                                HWHFuncs.setProgress(logMsg, false);
                                 // Fall through to normal execution
                             } else {
                                 const towerInfo = getTowerInfo(targetLevelId, mapState);
                                 
                                 if (!towerInfo) {
-                                    HWHFuncs.setProgress(`AOC: ${recording.name} - Tower info not found for position ${targetLevelId}, executing move normally`, false);
+                                    const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] Tower info not found for position ${targetLevelId}, executing move normally`;
+                                    console.log(logMsg);
+                                    HWHFuncs.setProgress(logMsg, false);
                                     // Fall through to normal execution
                                 } else {
                                     const towerUserId = towerInfo.userId;
@@ -991,6 +995,7 @@
                                                 });
                                                 
                                                 // Check for battle errors and log response
+                                                let battleSuccess = false;
                                                 if (battleResponse && battleResponse.results && battleResponse.results.length > 0) {
                                                     const battleResult = battleResponse.results.find(r => r.ident === 'body');
                                                     if (battleResult && battleResult.result) {
@@ -1013,6 +1018,7 @@
                                                                 console.error('AOC: Battle error data:', JSON.stringify(errorDetails.data, null, 2));
                                                             }
                                                             totalFailureCount++;
+                                                            battleSuccess = false;
                                                         } else {
                                                             const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully against enemy ${targetEnemyId}`;
                                                             console.log(successMsg);
@@ -1022,12 +1028,14 @@
                                                             }
                                                             HWHFuncs.setProgress(successMsg, false);
                                                             totalSuccessCount++;
+                                                            battleSuccess = true;
                                                         }
                                                     } else {
                                                         const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: Unexpected battle response structure`;
                                                         console.warn(warningMsg);
                                                         console.warn('AOC: Battle response:', JSON.stringify(battleResponse, null, 2));
                                                         totalSuccessCount++;
+                                                        battleSuccess = true; // Assume success if no error found
                                                     }
                                                 } else {
                                                     const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: No results in battle response`;
@@ -1037,19 +1045,37 @@
                                                     console.log(successMsg);
                                                     HWHFuncs.setProgress(successMsg, false);
                                                     totalSuccessCount++;
+                                                    battleSuccess = true; // Assume success if no error found
                                                 }
                                                 
-                                                // Wait 5 seconds cooldown after battle before moving into tower
-                                                const cooldownMsg = `AOC: ${recording.name} - [Step ${i + 1}] Waiting 5 seconds cooldown after battle, then moving into tower...`;
-                                                console.log(cooldownMsg);
-                                                HWHFuncs.setProgress(cooldownMsg, false);
-                                                await new Promise(resolve => setTimeout(resolve, 5000));
-                                                
-                                                // After battle and cooldown, continue to execute the move to occupy the tower
-                                                // Don't skip - let it fall through to execute the move normally
-                                                const moveAfterBattleMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle complete, now moving into tower at position ${targetLevelId}`;
-                                                console.log(moveAfterBattleMsg);
-                                                HWHFuncs.setProgress(moveAfterBattleMsg, false);
+                                                // Only wait for cooldown and move if battle was successful
+                                                if (battleSuccess) {
+                                                    // Wait 5 seconds cooldown after battle before moving into tower
+                                                    const cooldownMsg = `AOC: ${recording.name} - [Step ${i + 1}] Waiting 5 seconds cooldown after battle, then moving into tower...`;
+                                                    console.log(cooldownMsg);
+                                                    HWHFuncs.setProgress(cooldownMsg, false);
+                                                    
+                                                    // Check for abort during cooldown (split into 1-second intervals)
+                                                    for (let waitCount = 0; waitCount < 5; waitCount++) {
+                                                        if (playAllAborted || recordingAborted) {
+                                                            HWHFuncs.setProgress(`AOC: ${recording.name} - [Step ${i + 1}] Playback interrupted during cooldown`, true);
+                                                            return;
+                                                        }
+                                                        await new Promise(resolve => setTimeout(resolve, 1000));
+                                                    }
+                                                    
+                                                    // After battle and cooldown, continue to execute the move to occupy the tower
+                                                    // Don't skip - let it fall through to execute the move normally
+                                                    const moveAfterBattleMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle complete, now moving into tower at position ${targetLevelId}`;
+                                                    console.log(moveAfterBattleMsg);
+                                                    HWHFuncs.setProgress(moveAfterBattleMsg, false);
+                                                } else {
+                                                    // Battle failed - skip the move and continue to next call
+                                                    const skipMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle failed, skipping move to tower at position ${targetLevelId}`;
+                                                    console.log(skipMsg);
+                                                    HWHFuncs.setProgress(skipMsg, false);
+                                                    continue;
+                                                }
                                             } else {
                                                 const logMsg = `AOC: ${recording.name} - [Step ${i + 1}] No enemy IDs found, executing move normally`;
                                                 console.log(logMsg);
@@ -1111,6 +1137,22 @@
                     
                     const response = await Send({ calls: [callToExecute] });
                     
+                    // Check for top-level error in response (e.g., "NotAvailable" - "level is too far away")
+                    if (response && response.error) {
+                        const topLevelError = response.error;
+                        const errorName = topLevelError.name || 'Unknown';
+                        const errorDescription = topLevelError.description || 'No description';
+                        
+                        const errorMsg = `Top-level API Error: ${errorName} - ${errorDescription}`;
+                        const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
+                        console.error(fullErrorMsg);
+                        console.error('AOC: Full top-level error response:', JSON.stringify(response, null, 2));
+                        HWHFuncs.setProgress(fullErrorMsg, false);
+                        
+                        // Log error but continue execution (will queue up anyway)
+                        totalFailureCount++;
+                    }
+                    
                     // Log response details
                     if (response && response.results && response.results.length > 0) {
                         const result = response.results.find(r => r.ident === 'body');
@@ -1134,6 +1176,9 @@
                                 if (errorDetails.data) {
                                     console.error('AOC: Error data:', JSON.stringify(errorDetails.data, null, 2));
                                 }
+                                
+                                // Log error but continue execution (will queue up anyway)
+                                totalFailureCount++;
                             } else if (result.result.response) {
                                 // Log successful response summary
                                 const responseSummary = `AOC: ${recording.name} - [Step ${i + 1}] Response received for ${call.name}`;
@@ -1220,7 +1265,15 @@
                             const cooldownMsg = `AOC: ${recording.name} - [Step ${i + 1}] Waiting 5 seconds cooldown after battle...`;
                             console.log(cooldownMsg);
                             HWHFuncs.setProgress(cooldownMsg, false);
-                            await new Promise(resolve => setTimeout(resolve, 5000));
+                            
+                            // Check for abort during cooldown (split into 1-second intervals)
+                            for (let waitCount = 0; waitCount < 5; waitCount++) {
+                                if (playAllAborted || recordingAborted) {
+                                    HWHFuncs.setProgress(`AOC: ${recording.name} - [Step ${i + 1}] Playback interrupted during cooldown`, true);
+                                    return;
+                                }
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            }
                         }
                     } else {
                         // Update success/failure counts for non-battle calls
