@@ -54,7 +54,7 @@
     // --- TOWER POSITIONS ---
     // Tower positions extracted from townPositions in moveResponse.json, Moreresponse3.json, and moveResponse2.json
     const TOWER_POSITIONS = new Set([
-        1, 26, 29, 33, 36, 98, 101, 112, 123, 126, 333, 340, 356, 359, 375, 378, 407, 423, 426, 436, 446, 449, 465, 585, 588, 596
+        1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596
     ]);
 
     function shouldRecordAPICall(apiName) {
