@@ -51,7 +51,7 @@
     // Quest collection constants
     const QUEST_COLLECTION_MAX_ITERATIONS = 50;
     const QUEST_COLLECTION_DELAY = 100;
-    const QUEST_ID_FILTER_THRESHOLD = 1800000000;
+    const QUEST_ID_FILTER_THRESHOLD = 1900000000;
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
