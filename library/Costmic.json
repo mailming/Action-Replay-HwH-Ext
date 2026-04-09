@@ -1,0 +1,125 @@
+{
+  "recordings": [
+    {
+      "id": "1775748844329_s9bwodxfg",
+      "name": "CostmicBattle",
+      "description": "",
+      "createdAt": 1775748844329,
+      "expirationDays": 0,
+      "expiresAt": null,
+      "autoRun": false,
+      "repeatCount": 1,
+      "apiCalls": [
+        {
+          "name": "epicBrawl_getEnemy",
+          "args": {},
+          "context": {
+            "actionTs": 52705
+          },
+          "ident": "body"
+        },
+        {
+          "name": "epicBrawl_startBattle",
+          "args": {
+            "heroes": [
+              58,
+              63,
+              48,
+              40,
+              28
+            ],
+            "pet": 6008,
+            "favor": {
+              "28": 6004,
+              "48": 6001,
+              "58": 6005,
+              "63": 6000
+            }
+          },
+          "context": {
+            "actionTs": 61342
+          },
+          "ident": "group_1_body"
+        },
+        {
+          "name": "epicBrawl_endBattle",
+          "args": {
+            "result": {
+              "win": true,
+              "stars": 3
+            },
+            "progress": [
+              {
+                "v": 282,
+                "b": 0,
+                "seed": 670667915,
+                "attackers": {
+                  "input": [],
+                  "heroes": {
+                    "28": {
+                      "hp": 398109,
+                      "energy": 400,
+                      "isDead": false
+                    },
+                    "40": {
+                      "hp": 507526,
+                      "energy": 400,
+                      "isDead": false
+                    },
+                    "48": {
+                      "hp": 671963,
+                      "energy": 500,
+                      "isDead": false,
+                      "extra": {
+                        "hero48StartEnergy": 1
+                      }
+                    },
+                    "58": {
+                      "hp": 489314,
+                      "energy": 753,
+                      "isDead": false
+                    },
+                    "63": {
+                      "hp": 612092,
+                      "energy": 1000,
+                      "isDead": false
+                    },
+                    "6008": {
+                      "hp": -1,
+                      "energy": 23,
+                      "isDead": false
+                    }
+                  }
+                },
+                "defenders": {
+                  "input": [],
+                  "heroes": {
+                    "6": {
+                      "hp": -1,
+                      "energy": 956,
+                      "isDead": false
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "context": {
+            "actionTs": 65811
+          },
+          "ident": "group_1_body"
+        },
+        {
+          "name": "epicBrawl_getWinStreak",
+          "args": {},
+          "context": {
+            "actionTs": 65811
+          },
+          "ident": "group_1_epicBrawl_getWinStreak"
+        }
+      ]
+    }
+  ],
+  "exportDate": "2026-04-09T15:35:19.616Z",
+  "version": "1.1.6"
+}
