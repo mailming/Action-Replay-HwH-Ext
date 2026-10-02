@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      1.2.0
+// @version      1.2.2
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -18,7 +18,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.2.0";
+    const EXTENSION_VERSION = "1.2.2";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -48,6 +48,8 @@
     let heroTournamentGoEMode = false; // Use Gift of Elements to climb hero tournament ranking
     let heroTournamentGoERunning = false; // Prevent overlapping GoE boost loops
     let heroTournamentGoECooldownUntil = 0; // Avoid spam-retrying when gold/sparks are depleted
+    let heroTournamentEventActive = null; // null = unknown, true/false from powerTournament_getState
+    let heroTournamentEventInfo = null; // { id, type, startTime, endTime, myPoints }
     let currentlyPlayingRecordingId = null; // Track which individual recording is playing
     let recordingAborted = false; // Flag to abort individual recording execution
     
@@ -64,6 +66,8 @@
     const GOE_CONSUMABLE_ID_TITAN_GIFT = 24;
     const GOE_BATCH_SIZE = 50;
     const GOE_RESOURCE_COOLDOWN_MS = 60000;
+    const HERO_TOURNAMENT_TYPE = 'heroes';
+    const TITAN_TOURNAMENT_TYPE = 'titans';
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -1436,6 +1440,12 @@
             let totalEstimatedPower = 0;
 
             while (heroTournamentMode && heroTournamentGoEMode) {
+                const eventState = await getHeroTournamentEventState();
+                if (!eventState.active) {
+                    console.log('Action Replay: Hero Tournament GoE - Event not active, stopping');
+                    break;
+                }
+
                 const ranking = await getHeroTournamentRankingInfo();
                 if (!ranking) {
                     console.log('Action Replay: Hero Tournament GoE - Could not fetch ranking, stopping');
@@ -1506,6 +1516,119 @@
     }
 
     // --- HERO TOURNAMENT RANKING POLLING ---
+    /**
+     * Check if Hero Tournament event is currently live via powerTournament_getState.
+     * Active when state === 1 and now is within [startTime, endTime].
+     */
+    async function getHeroTournamentEventState() {
+        const { Send } = window;
+        try {
+            const response = await Send({
+                calls: [{
+                    name: 'powerTournament_getState',
+                    args: {},
+                    context: { actionTs: Math.floor(performance.now()) },
+                    ident: 'body'
+                }]
+            });
+
+            let stateData = null;
+            if (response?.results?.length > 0) {
+                const result = response.results[0];
+                if (result?.result?.response) {
+                    stateData = result.result.response;
+                }
+            }
+            if (!stateData && response?.results?.length > 0) {
+                const result = response.results.find(r => r.ident === 'body' || r.ident === 'powerTournament_getState');
+                if (result?.result?.response) {
+                    stateData = result.result.response;
+                }
+            }
+
+            if (!stateData || typeof stateData.state === 'undefined') {
+                heroTournamentEventActive = false;
+                heroTournamentEventInfo = null;
+                updateHeroTournamentLiveBadge();
+                return { active: false };
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const inWindow = now >= (stateData.startTime || 0) && now <= (stateData.endTime || 0);
+            const typeLive = stateData.state === 1 && inWindow;
+            // Hero Tournament Mode / GoE only when type is heroes
+            const active = typeLive && stateData.type === HERO_TOURNAMENT_TYPE;
+
+            heroTournamentEventActive = active;
+            heroTournamentEventInfo = {
+                id: stateData.id,
+                type: stateData.type,
+                state: stateData.state,
+                startTime: stateData.startTime,
+                endTime: stateData.endTime,
+                myPoints: stateData.currentTournamentPoints,
+                typeLive
+            };
+            updateHeroTournamentLiveBadge();
+
+            return { active, ...heroTournamentEventInfo };
+        } catch (error) {
+            console.error('Action Replay: Hero Tournament - Error checking event state:', error);
+            heroTournamentEventActive = false;
+            heroTournamentEventInfo = null;
+            updateHeroTournamentLiveBadge();
+            return { active: false };
+        }
+    }
+
+    function isHeroTournamentLive() {
+        return heroTournamentEventActive === true && heroTournamentEventInfo?.type === HERO_TOURNAMENT_TYPE;
+    }
+
+    function updateHeroTournamentGoEVisibility() {
+        const goeLabel = document.getElementById('hero-tournament-goe-label');
+        if (!goeLabel) return;
+        // GoE is Hero Tournament only — hide for Titan Tournament, Winterfest, or when not live
+        goeLabel.style.display = isHeroTournamentLive() ? 'flex' : 'none';
+    }
+
+    function updateHeroTournamentLiveBadge() {
+        const badge = document.getElementById('hero-tournament-live-badge');
+        if (!badge) {
+            updateHeroTournamentGoEVisibility();
+            return;
+        }
+
+        const info = heroTournamentEventInfo;
+        const endStr = info?.endTime ? new Date(info.endTime * 1000).toLocaleString() : '';
+
+        if (heroTournamentEventActive === true) {
+            badge.textContent = '● LIVE';
+            badge.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+            badge.style.color = '#fff';
+            badge.title = endStr ? `Hero Tournament is live until ${endStr}` : 'Hero Tournament is live';
+        } else if (info?.typeLive && info.type === TITAN_TOURNAMENT_TYPE) {
+            badge.textContent = '○ TITAN';
+            badge.style.background = 'rgba(100,100,100,0.6)';
+            badge.style.color = '#ccc';
+            badge.title = endStr
+                ? `Titan Tournament is live until ${endStr} (Hero Tournament Mode idle)`
+                : 'Titan Tournament is live (Hero Tournament Mode idle)';
+        } else if (heroTournamentEventActive === false) {
+            badge.textContent = '○ OFF';
+            badge.style.background = 'rgba(100,100,100,0.6)';
+            badge.style.color = '#ccc';
+            badge.title = 'Hero Tournament is not active';
+        } else {
+            badge.textContent = '…';
+            badge.style.background = 'rgba(0,0,0,0.4)';
+            badge.style.color = '#aaa';
+            badge.title = 'Checking Hero Tournament status…';
+        }
+
+        updateHeroTournamentGoEVisibility();
+    }
+
     async function getHeroTournamentRankingInfo() {
         const { Send } = window;
         const currentUserId = getCurrentUserId();
@@ -1595,8 +1718,8 @@
         console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
         await executeAllRecordingsForHeroTournament();
 
-        // GoE runs in addition to recordings when enabled
-        if (heroTournamentGoEMode) {
+        // GoE runs in addition to recordings when enabled — Hero Tournament (type=heroes) only
+        if (heroTournamentGoEMode && isHeroTournamentLive()) {
             if (Date.now() < heroTournamentGoECooldownUntil) {
                 const secsLeft = Math.ceil((heroTournamentGoECooldownUntil - Date.now()) / 1000);
                 console.log(`Action Replay: Hero Tournament GoE - Cooling down after resource depletion (${secsLeft}s left)`);
@@ -1709,13 +1832,20 @@
         }
         
         try {
-            // Fetch ranking and execute recordings / GoE if needed (this will wait for completion)
-            await fetchHeroTournamentRanking();
+            // Only run tournament actions when the event is live
+            const eventState = await getHeroTournamentEventState();
+            if (!eventState.active) {
+                console.log('Action Replay: Hero Tournament - Event not active, skipping actions');
+            } else {
+                // Fetch ranking and execute recordings / GoE if needed (this will wait for completion)
+                await fetchHeroTournamentRanking();
+            }
         } catch (error) {
             console.error('Action Replay: Error in hero tournament polling cycle:', error);
         }
         
         // Schedule next check only after current one completes (including recording/GoE execution)
+        // Keep polling so we resume automatically when the event goes live
         if (heroTournamentMode) {
             heroTournamentInterval = setTimeout(() => {
                 runHeroTournamentPollingCycle();
@@ -1944,12 +2074,13 @@
                     <input type="checkbox" id="hero-tournament-mode-checkbox" ${heroTournamentMode ? 'checked' : ''} style="margin-right: 5px;">
                     <span>🏆 Hero Tournament Mode</span>
                 </label>
+                <span id="hero-tournament-live-badge" style="padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; letter-spacing: 0.5px; background: rgba(0,0,0,0.4); color: #aaa;">…</span>
                 <label style="display: flex; align-items: center; gap: 8px; color: #fce1ac;">
                     <span>Goal:</span>
                     <input type="number" id="hero-tournament-goal-place-input" min="0" max="50" value="${heroTournamentGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
                     <span>place</span>
                 </label>
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac; margin-left: 10px;" title="In addition to recordings: when below goal place, also boost Gift of Elements from highest-power hero to level 29, one hero at a time, until target place or gold/sparks run out">
+                <label id="hero-tournament-goe-label" style="cursor: pointer; display: none; align-items: center; gap: 8px; color: #fce1ac; margin-left: 10px;" title="Hero Tournament only. In addition to recordings: when below goal place, also boost Gift of Elements from highest-power hero to level 29, one hero at a time, until target place or gold/sparks run out">
                     <input type="checkbox" id="hero-tournament-goe-checkbox" ${heroTournamentGoEMode ? 'checked' : ''} style="margin-right: 5px;">
                     <span>⚡ Gift of Elements</span>
                 </label>
@@ -1986,6 +2117,10 @@
         
         // Populate recordings list
         populateRecordingsList();
+
+        // Show cached event status / GoE visibility immediately, then refresh from API
+        updateHeroTournamentLiveBadge();
+        getHeroTournamentEventState().catch(() => {});
         
         // Event listeners
         backdrop.addEventListener('click', (e) => {
