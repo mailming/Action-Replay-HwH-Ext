@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      1.1.6
+// @version      1.2.0
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -18,7 +18,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.1.6";
+    const EXTENSION_VERSION = "1.2.0";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -45,13 +45,25 @@
     let heroTournamentMode = false; // Hero Tournament mode
     let heroTournamentGoalPlace = 15; // Goal ranking place (0-50)
     let heroTournamentInterval = null; // Interval for hero tournament ranking polling
+    let heroTournamentGoEMode = false; // Use Gift of Elements to climb hero tournament ranking
+    let heroTournamentGoERunning = false; // Prevent overlapping GoE boost loops
+    let heroTournamentGoECooldownUntil = 0; // Avoid spam-retrying when gold/sparks are depleted
     let currentlyPlayingRecordingId = null; // Track which individual recording is playing
     let recordingAborted = false; // Flag to abort individual recording execution
     
     // Quest collection constants
     const QUEST_COLLECTION_MAX_ITERATIONS = 50;
     const QUEST_COLLECTION_DELAY = 100;
-    const QUEST_ID_FILTER_THRESHOLD = 1900000000;
+    const QUEST_ID_FILTER_THRESHOLD = 1800000000;
+
+    // Gift of the Elements (hero tournament power boost) — from HWHGiftOfTheElementsExt
+    const GOE_POWER_LEVEL = [22, 22, 22, 22, 22, 66, 66, 66, 66, 66, 110, 110, 110, 110, 110, 154,
+        154, 154, 154, 154, 198, 198, 198, 198, 198, 242, 242, 242, 242, 242];
+    const GOE_TARGET_GIFT_LEVEL = 29;
+    const GOE_MIN_USER_LEVEL = 30;
+    const GOE_CONSUMABLE_ID_TITAN_GIFT = 24;
+    const GOE_BATCH_SIZE = 50;
+    const GOE_RESOURCE_COOLDOWN_MS = 60000;
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -363,6 +375,7 @@
         winterfestGoalPlace = settings.winterfestGoalPlace !== undefined ? settings.winterfestGoalPlace : 50;
         heroTournamentMode = settings.heroTournamentMode || false;
         heroTournamentGoalPlace = settings.heroTournamentGoalPlace !== undefined ? settings.heroTournamentGoalPlace : 15;
+        heroTournamentGoEMode = settings.heroTournamentGoEMode || false;
     }
 
     function saveSettings() {
@@ -373,7 +386,8 @@
             winterfestMode: winterfestMode,
             winterfestGoalPlace: winterfestGoalPlace,
             heroTournamentMode: heroTournamentMode,
-            heroTournamentGoalPlace: heroTournamentGoalPlace
+            heroTournamentGoalPlace: heroTournamentGoalPlace,
+            heroTournamentGoEMode: heroTournamentGoEMode
         });
     }
 
@@ -1303,103 +1317,308 @@
         }
     }
 
+    // --- GIFT OF THE ELEMENTS (Hero Tournament) ---
+    // Algorithm adapted from HWHGiftOfTheElementsExt: upgrade highest-power heroes to lvl 29, one at a time.
+
+    function sortHeroesByPowerDesc(heroes) {
+        return [...heroes].sort((a, b) => b.power - a.power);
+    }
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Upgrade the single highest-power hero still below GoE level 29.
+     * @returns {{ upgraded: boolean, goldGone: boolean, heroId: number|null, levelsGained: number, estimatedPower: number }}
+     */
+    async function upgradeHighestHeroGoETo29() {
+        const { Caller, lib, HWHFuncs } = window;
+        if (!Caller || !lib) {
+            console.error('Action Replay: Hero Tournament GoE - Caller/lib not available');
+            return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
+        }
+
+        let [heroGetAll, inventory, user] = await new Caller(['heroGetAll', 'inventoryGet', 'userGetInfo']).execute();
+        let heroes = sortHeroesByPowerDesc(Object.values(heroGetAll));
+        const titanGiftLib = lib.getData('titanGift');
+        let titanGift = inventory.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0;
+        let gold = user.gold;
+
+        if (user.level < GOE_MIN_USER_LEVEL) {
+            console.log('Action Replay: Hero Tournament GoE - Account below team level 30, cannot upgrade');
+            return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
+        }
+
+        const targetHero = heroes.find(hero => hero.titanGiftLevel < GOE_TARGET_GIFT_LEVEL);
+        if (!targetHero) {
+            console.log('Action Replay: Hero Tournament GoE - All heroes already at Gift of Elements level 29+');
+            return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
+        }
+
+        let calls = [];
+        let levelsGained = 0;
+        let estimatedPower = 0;
+        let goldGone = false;
+        const heroId = targetHero.id;
+        let hero = targetHero;
+
+        const sendCalls = async () => {
+            if (calls.length === 0) return;
+            await Caller.send(calls);
+            levelsGained += calls.length;
+            heroGetAll = await new Caller('heroGetAll').execute();
+            heroes = sortHeroesByPowerDesc(Object.values(heroGetAll));
+            calls = [];
+            hero = heroes.find(entry => entry.id === heroId);
+            if (HWHFuncs) {
+                HWHFuncs.setProgress(
+                    `Action Replay: GoE hero ${heroId} → level ${hero?.titanGiftLevel ?? '?'}`,
+                    false
+                );
+            }
+        };
+
+        console.log(`Action Replay: Hero Tournament GoE - Boosting hero ${heroId} (power ${hero.power}) from GoE ${hero.titanGiftLevel} → ${GOE_TARGET_GIFT_LEVEL}`);
+
+        while (hero && hero.titanGiftLevel < GOE_TARGET_GIFT_LEVEL) {
+            const nextLevelCost = titanGiftLib[hero.titanGiftLevel + 1]?.cost;
+            if (!nextLevelCost) break;
+
+            const costTitanGift = nextLevelCost.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0;
+            if (titanGift < costTitanGift || gold < nextLevelCost.gold) {
+                goldGone = gold < nextLevelCost.gold || titanGift < costTitanGift;
+                break;
+            }
+
+            estimatedPower += GOE_POWER_LEVEL[hero.titanGiftLevel] || 0;
+            calls.push({ name: 'heroTitanGiftLevelUp', args: { heroId: hero.id } });
+            titanGift -= costTitanGift;
+            gold -= nextLevelCost.gold;
+            hero.titanGiftLevel++;
+
+            if (calls.length >= GOE_BATCH_SIZE) {
+                await sendCalls();
+                if (!hero || hero.titanGiftLevel >= GOE_TARGET_GIFT_LEVEL) break;
+            }
+        }
+
+        await sendCalls();
+
+        if (levelsGained === 0) {
+            console.log('Action Replay: Hero Tournament GoE - Not enough gold or sparks of power');
+            return { upgraded: false, goldGone: true, heroId, levelsGained: 0, estimatedPower: 0 };
+        }
+
+        console.log(`Action Replay: Hero Tournament GoE - Hero ${heroId}: +${levelsGained} level(s), ~${estimatedPower} power${goldGone ? ' (resources depleted)' : ''}`);
+        return { upgraded: true, goldGone, heroId, levelsGained, estimatedPower };
+    }
+
+    /**
+     * Loop: boost highest hero → 29, then recheck ranking, until goal place or resources run out.
+     */
+    async function runHeroTournamentGoEUntilTarget() {
+        if (heroTournamentGoERunning) {
+            console.log('Action Replay: Hero Tournament GoE - Already running, skipping');
+            return;
+        }
+
+        const { HWHFuncs } = window;
+        heroTournamentGoERunning = true;
+
+        try {
+            if (HWHFuncs) {
+                HWHFuncs.setProgress('Action Replay: Hero Tournament GoE started (highest → lvl 29)...', false);
+            }
+            console.log(`Action Replay: Hero Tournament GoE - Starting boost loop until place ≤ ${heroTournamentGoalPlace} or gold/sparks run out`);
+
+            let totalUpgrades = 0;
+            let totalEstimatedPower = 0;
+
+            while (heroTournamentMode && heroTournamentGoEMode) {
+                const ranking = await getHeroTournamentRankingInfo();
+                if (!ranking) {
+                    console.log('Action Replay: Hero Tournament GoE - Could not fetch ranking, stopping');
+                    break;
+                }
+
+                if (ranking.myRank === null) {
+                    console.log('Action Replay: Hero Tournament GoE - Not ranked, stopping');
+                    break;
+                }
+
+                console.log(`Action Replay: Hero Tournament GoE - Place ${ranking.myRank} / goal ${heroTournamentGoalPlace}, points ${ranking.myPoints}`);
+
+                if (ranking.myRank <= heroTournamentGoalPlace) {
+                    console.log(`Action Replay: Hero Tournament GoE - Target placement reached (place ${ranking.myRank})`);
+                    heroTournamentGoECooldownUntil = 0;
+                    if (HWHFuncs) {
+                        HWHFuncs.setProgress(`Action Replay: Hero Tournament GoE - Target place ${heroTournamentGoalPlace} reached!`, true);
+                    }
+                    break;
+                }
+
+                const result = await upgradeHighestHeroGoETo29();
+                if (!result.upgraded) {
+                    console.log('Action Replay: Hero Tournament GoE - Stopped (gold/sparks out or nothing left to upgrade)');
+                    heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
+                    if (HWHFuncs) {
+                        HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Gold/sparks depleted or all heroes at 29', true);
+                    }
+                    break;
+                }
+
+                totalUpgrades += result.levelsGained;
+                totalEstimatedPower += result.estimatedPower;
+
+                if (result.goldGone) {
+                    // Recheck once more after partial upgrade, then stop if still short
+                    const postRanking = await getHeroTournamentRankingInfo();
+                    if (postRanking && postRanking.myRank !== null && postRanking.myRank <= heroTournamentGoalPlace) {
+                        console.log(`Action Replay: Hero Tournament GoE - Target placement reached after last boost (place ${postRanking.myRank})`);
+                        heroTournamentGoECooldownUntil = 0;
+                        if (HWHFuncs) {
+                            HWHFuncs.setProgress(`Action Replay: Hero Tournament GoE - Target place ${heroTournamentGoalPlace} reached!`, true);
+                        }
+                    } else {
+                        console.log('Action Replay: Hero Tournament GoE - Resources depleted before reaching target');
+                        heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
+                        if (HWHFuncs) {
+                            HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Gold/sparks depleted before target', true);
+                        }
+                    }
+                    break;
+                }
+
+                // Brief pause so tournament points can update before next ranking check
+                await delay(1500);
+            }
+
+            console.log(`Action Replay: Hero Tournament GoE - Done. Upgrades: ${totalUpgrades}, est. power: ${totalEstimatedPower}`);
+        } catch (error) {
+            console.error('Action Replay: Hero Tournament GoE - Error:', error);
+            if (HWHFuncs) {
+                HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Error (see console)', true);
+            }
+        } finally {
+            heroTournamentGoERunning = false;
+        }
+    }
+
     // --- HERO TOURNAMENT RANKING POLLING ---
+    async function getHeroTournamentRankingInfo() {
+        const { Send } = window;
+        const currentUserId = getCurrentUserId();
+
+        const callToExecute = {
+            name: 'powerTournament_getGroupInfo',
+            args: {},
+            context: {
+                actionTs: Math.floor(performance.now())
+            },
+            ident: 'body'
+        };
+
+        const response = await Send({ calls: [callToExecute] });
+
+        let responseData = null;
+        if (response && response.results && response.results.length > 0) {
+            const result = response.results[0];
+            if (result && result.result && result.result.response) {
+                responseData = result.result.response;
+            }
+        }
+        if (!responseData && response && response.results && response.results.length > 0) {
+            const result = response.results.find(r => r.ident === 'body' || r.ident === 'powerTournament_getGroupInfo');
+            if (result && result.result && result.result.response) {
+                responseData = result.result.response;
+            }
+        }
+
+        if (!responseData) {
+            console.error('Action Replay: Hero Tournament - Could not parse response structure');
+            return null;
+        }
+
+        const users = responseData.users || {};
+        const points = responseData.points || {};
+
+        if (Object.keys(points).length === 0) {
+            console.log('Action Replay: Hero Tournament - No points data available (tournament may not be active)');
+            return null;
+        }
+
+        const sortedEntries = Object.entries(points)
+            .map(([userId, pointsValue]) => ({
+                userId: userId,
+                points: pointsValue,
+                user: users[userId] || null
+            }))
+            .sort((a, b) => b.points - a.points);
+
+        let myRank = null;
+        let myPoints = null;
+
+        if (currentUserId) {
+            const currentUserIdStr = String(currentUserId);
+            const myEntry = sortedEntries.find((entry, index) => {
+                if (String(entry.userId) === currentUserIdStr) {
+                    myRank = index + 1;
+                    myPoints = entry.points;
+                    return true;
+                }
+                return false;
+            });
+
+            if (!myEntry) {
+                const currentUserIdNum = parseInt(currentUserIdStr);
+                if (!isNaN(currentUserIdNum)) {
+                    sortedEntries.find((entry, index) => {
+                        const entryUserIdNum = parseInt(String(entry.userId));
+                        if (entryUserIdNum === currentUserIdNum) {
+                            myRank = index + 1;
+                            myPoints = entry.points;
+                            return true;
+                        }
+                        return false;
+                    });
+                }
+            }
+        } else {
+            console.warn('Action Replay: Hero Tournament - Cannot determine user ranking without userId. Please ensure you are logged in.');
+        }
+
+        return { currentUserId, myRank, myPoints, sortedEntries };
+    }
+
+    async function handleHeroTournamentBelowGoal(myRank) {
+        console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
+        await executeAllRecordingsForHeroTournament();
+
+        // GoE runs in addition to recordings when enabled
+        if (heroTournamentGoEMode) {
+            if (Date.now() < heroTournamentGoECooldownUntil) {
+                const secsLeft = Math.ceil((heroTournamentGoECooldownUntil - Date.now()) / 1000);
+                console.log(`Action Replay: Hero Tournament GoE - Cooling down after resource depletion (${secsLeft}s left)`);
+                return;
+            }
+            console.log(`Action Replay: Hero Tournament Ranking - Starting Gift of Elements boost (in addition to recordings)...`);
+            await runHeroTournamentGoEUntilTarget();
+        }
+    }
+
     async function fetchHeroTournamentRanking() {
         try {
-            const { Send, HWHFuncs } = window;
-            const currentUserId = getCurrentUserId();
-            
-            // Call powerTournament_getGroupInfo API
-            const callToExecute = {
-                name: 'powerTournament_getGroupInfo',
-                args: {},
-                context: {
-                    actionTs: Math.floor(performance.now())
-                },
-                ident: 'body' // Use 'body' like winterfest for consistency
-            };
-            
-            const response = await Send({ calls: [callToExecute] });
-            
-            // Process response
-            let responseData = null;
-            
-            // Try format 1: response.results[0] (standard format)
-            if (response && response.results && response.results.length > 0) {
-                const result = response.results[0];
-                if (result && result.result && result.result.response) {
-                    responseData = result.result.response;
-                }
-            }
-            
-            // Fallback: find by ident
-            if (!responseData && response && response.results && response.results.length > 0) {
-                const result = response.results.find(r => r.ident === 'body' || r.ident === 'powerTournament_getGroupInfo');
-                if (result && result.result && result.result.response) {
-                    responseData = result.result.response;
-                }
-            }
-            
-            if (!responseData) {
-                console.error('Action Replay: Hero Tournament - Could not parse response structure');
+            // Skip if GoE boost loop is already running (it rechecks ranking itself)
+            if (heroTournamentGoERunning) {
                 return;
             }
-            
-            const users = responseData.users || {};
-            const points = responseData.points || {};
-            
-            if (Object.keys(points).length === 0) {
-                console.log('Action Replay: Hero Tournament - No points data available (tournament may not be active)');
-                return;
-            }
-            
-            // Calculate ranking by sorting points in descending order
-            const sortedEntries = Object.entries(points)
-                .map(([userId, pointsValue]) => ({
-                    userId: userId,
-                    points: pointsValue,
-                    user: users[userId] || null
-                }))
-                .sort((a, b) => b.points - a.points); // Sort descending by points
-            
-            // Find user's rank (1-based)
-            let myRank = null;
-            let myPoints = null;
-            
-            if (currentUserId) {
-                const currentUserIdStr = String(currentUserId);
-                
-                const myEntry = sortedEntries.find((entry, index) => {
-                    // Try both string and number comparison
-                    const entryUserId = String(entry.userId);
-                    if (entryUserId === currentUserIdStr) {
-                        myRank = index + 1; // 1-based rank
-                        myPoints = entry.points;
-                        return true;
-                    }
-                    return false;
-                });
-                
-                // Try to find by comparing as numbers too (in case of type mismatch)
-                if (!myEntry) {
-                    const currentUserIdNum = parseInt(currentUserIdStr);
-                    if (!isNaN(currentUserIdNum)) {
-                        sortedEntries.find((entry, index) => {
-                            const entryUserIdNum = parseInt(String(entry.userId));
-                            if (entryUserIdNum === currentUserIdNum) {
-                                myRank = index + 1;
-                                myPoints = entry.points;
-                                return true;
-                            }
-                            return false;
-                        });
-                    }
-                }
-            } else {
-                // If we can't get userId, we can't determine ranking
-                console.warn('Action Replay: Hero Tournament - Cannot determine user ranking without userId. Please ensure you are logged in.');
-            }
-            
+
+            const ranking = await getHeroTournamentRankingInfo();
+            if (!ranking) return;
+
+            const { currentUserId, myRank, myPoints, sortedEntries } = ranking;
+
             // If goal is 0, only output 1st place and my userId
             if (heroTournamentGoalPlace === 0) {
                 if (sortedEntries.length > 0) {
@@ -1414,26 +1633,23 @@
                     }
                 }
             } else {
-                // Goal is set, output goal place, my ranking, and difference
-                const goalIndex = heroTournamentGoalPlace - 1; // Convert to 0-based index
-                
+                const goalIndex = heroTournamentGoalPlace - 1;
+
                 if (goalIndex >= 0 && goalIndex < sortedEntries.length) {
                     const goalEntry = sortedEntries[goalIndex];
                     const goalPoints = parseInt(goalEntry.points) || 0;
-                    
+
                     console.log(`Action Replay: Hero Tournament Ranking - Goal Place ${heroTournamentGoalPlace}: ${goalEntry.user?.name || 'Unknown'} (User ${goalEntry.userId}), Points: ${goalEntry.points}`);
-                    
+
                     if (currentUserId && myRank !== null && myPoints !== null) {
                         const myPointsNum = parseInt(myPoints) || 0;
                         const difference = myPointsNum - goalPoints;
-                        
+
                         console.log(`Action Replay: Hero Tournament Ranking - My Ranking: Place ${myRank}, UserID: ${currentUserId}, Points: ${myPoints}`);
                         console.log(`Action Replay: Hero Tournament Ranking - Difference: ${difference > 0 ? '+' : ''}${difference} (My Points - Goal Place Points)`);
-                        
-                        // Check if my place is lower (worse) than goal place (higher number = worse rank)
+
                         if (myRank > heroTournamentGoalPlace) {
-                            console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
-                            await executeAllRecordingsForHeroTournament();
+                            await handleHeroTournamentBelowGoal(myRank);
                         } else {
                             console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is better than or equal to goal (${heroTournamentGoalPlace}), no action needed`);
                         }
@@ -1445,11 +1661,8 @@
                 } else {
                     console.log(`Action Replay: Hero Tournament Ranking - Goal place ${heroTournamentGoalPlace} is out of range (max: ${sortedEntries.length})`);
                     if (currentUserId && myRank !== null && myPoints !== null) {
-                        // Check if my place is lower (worse) than goal place
-                        // Note: User must be ranked (have a rank) for this to work
                         if (myRank > heroTournamentGoalPlace) {
-                            console.log(`Action Replay: Hero Tournament Ranking - My place (${myRank}) is lower than goal (${heroTournamentGoalPlace}), executing recordings...`);
-                            await executeAllRecordingsForHeroTournament();
+                            await handleHeroTournamentBelowGoal(myRank);
                         } else {
                             console.log(`Action Replay: Hero Tournament Ranking - My Ranking: Place ${myRank}, UserID: ${currentUserId}, Points: ${myPoints}`);
                         }
@@ -1496,13 +1709,13 @@
         }
         
         try {
-            // Fetch ranking and execute recordings if needed (this will wait for completion)
+            // Fetch ranking and execute recordings / GoE if needed (this will wait for completion)
             await fetchHeroTournamentRanking();
         } catch (error) {
             console.error('Action Replay: Error in hero tournament polling cycle:', error);
         }
         
-        // Schedule next check only after current one completes (including recording execution)
+        // Schedule next check only after current one completes (including recording/GoE execution)
         if (heroTournamentMode) {
             heroTournamentInterval = setTimeout(() => {
                 runHeroTournamentPollingCycle();
@@ -1736,6 +1949,10 @@
                     <input type="number" id="hero-tournament-goal-place-input" min="0" max="50" value="${heroTournamentGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
                     <span>place</span>
                 </label>
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac; margin-left: 10px;" title="In addition to recordings: when below goal place, also boost Gift of Elements from highest-power hero to level 29, one hero at a time, until target place or gold/sparks run out">
+                    <input type="checkbox" id="hero-tournament-goe-checkbox" ${heroTournamentGoEMode ? 'checked' : ''} style="margin-right: 5px;">
+                    <span>⚡ Gift of Elements</span>
+                </label>
             </div>
             <div class="api-repeater-controls">
                 <button id="start-recording-btn" class="api-repeater-btn" style="font-size: 16px; padding: 8px 15px; background: ${isRecording ? '#ff4444' : '#4CAF50'}; border-radius: 5px;">
@@ -1841,6 +2058,12 @@
             heroTournamentGoalPlace = value;
             e.target.value = value;
             saveSettings();
+        });
+        document.getElementById('hero-tournament-goe-checkbox').addEventListener('change', (e) => {
+            heroTournamentGoEMode = e.target.checked;
+            heroTournamentGoECooldownUntil = 0; // Allow immediate retry when toggled
+            saveSettings();
+            console.log(`Action Replay: Hero Tournament Gift of Elements ${heroTournamentGoEMode ? 'enabled' : 'disabled'}`);
         });
     }
 
