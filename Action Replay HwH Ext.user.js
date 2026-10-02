@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      1.2.2
+// @version      1.2.4
 // @description  Record and replay actions (captured from clicks) with auto-run and repeats
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -18,7 +18,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.2.2";
+    const EXTENSION_VERSION = "1.2.4";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -50,6 +50,9 @@
     let heroTournamentGoECooldownUntil = 0; // Avoid spam-retrying when gold/sparks are depleted
     let heroTournamentEventActive = null; // null = unknown, true/false from powerTournament_getState
     let heroTournamentEventInfo = null; // { id, type, startTime, endTime, myPoints }
+    let heroTournamentEndAutoCollectTournamentId = null; // Tournament id already force-collected near end
+    let heroTournamentEndAutoCollectTimer = null; // Timer to fire when entering last 5 minutes
+    let heroTournamentEndAutoCollectRunning = false;
     let currentlyPlayingRecordingId = null; // Track which individual recording is playing
     let recordingAborted = false; // Flag to abort individual recording execution
     
@@ -68,6 +71,7 @@
     const GOE_RESOURCE_COOLDOWN_MS = 60000;
     const HERO_TOURNAMENT_TYPE = 'heroes';
     const TITAN_TOURNAMENT_TYPE = 'titans';
+    const HERO_TOURNAMENT_END_AUTO_COLLECT_SECS = 5 * 60; // Force quest collect in last 5 minutes
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -277,17 +281,20 @@
         // Auto-execute enabled recordings
         scheduleAutoRuns();
         
-        // Auto-collect quest rewards if enabled
-        if (autoCollectRewards) {
-            setTimeout(async () => {
-                try {
+        // Auto-collect quest rewards if enabled (also forced near hero tournament end — see maybeForce...)
+        setTimeout(async () => {
+            try {
+                await getHeroTournamentEventState();
+                if (isWithinHeroTournamentEndAutoCollectWindow()) {
+                    await maybeForceAutoCollectNearHeroTournamentEnd();
+                } else if (autoCollectRewards) {
                     console.log(`${EXTENSION_NAME}: Auto-collecting quest rewards...`);
                     await collectAllQuestRewards();
-                } catch (error) {
-                    console.error(`${EXTENSION_NAME}: Error in auto quest reward collection:`, error);
                 }
-            }, 12000); // Wait 12 seconds after script load
-        }
+            } catch (error) {
+                console.error(`${EXTENSION_NAME}: Error in auto quest reward collection:`, error);
+            }
+        }, 12000); // Wait 12 seconds after script load
         
         // Start winterfest polling if enabled
         if (winterfestMode) {
@@ -911,14 +918,26 @@
     }
 
     // --- QUEST REWARDS COLLECTION ---
+    function isQuestFarmNotAvailableError(error) {
+        const errorMessage = (error && (error.message || error.toString())) || '';
+        const errorName = (error && error.name) || '';
+        const errorDesc = (typeof error === 'object' && error.description) ? String(error.description) : '';
+        const text = `${errorName} ${errorMessage} ${errorDesc}`;
+        return text.includes('NotAvailable') ||
+            text.includes('not pass farm requirements') ||
+            text.includes('not available');
+    }
+
     async function collectAllQuestRewards() {
         try {
             const { Send, HWHFuncs, Caller } = window;
-            const farmQuestIds = new Set();
+            const farmQuestIds = new Set(); // attempted (success or permanent skip)
+            const skippedQuestIds = new Set(); // NotAvailable / not farmable — never retry
             let totalCollected = 0;
+            let totalSkipped = 0;
             let iteration = 0;
 
-            // Collect only quests with ID > 1780000000
+            // Collect only quests with ID > QUEST_ID_FILTER_THRESHOLD
             while (iteration < QUEST_COLLECTION_MAX_ITERATIONS) {
                 iteration++;
                 console.log(`Action Replay: Quest collection iteration ${iteration}`);
@@ -934,11 +953,13 @@
                 
                 const allQuests = Array.isArray(questGetAll) ? questGetAll : Object.values(questGetAll || {});
                 
-                // Filter for completed quests (state === 2) with ID > 1780000000 only
+                // Filter for completed quests (state === 2) with high IDs; exclude permanent skips
                 const questsToFarm = allQuests.filter(q => {
                     if (!q || q.state !== 2) return false;
                     const questId = +q.id;
-                    return questId && !isNaN(questId) && questId > QUEST_ID_FILTER_THRESHOLD;
+                    if (!questId || isNaN(questId) || questId <= QUEST_ID_FILTER_THRESHOLD) return false;
+                    if (skippedQuestIds.has(questId) || farmQuestIds.has(questId)) return false;
+                    return true;
                 });
 
                 if (questsToFarm.length === 0) {
@@ -946,28 +967,18 @@
                     break;
                 }
 
-                const questIdsToFarm = [];
-                for (const quest of questsToFarm) {
-                    const questId = +quest.id;
-                    if (questId && !isNaN(questId) && !farmQuestIds.has(questId)) {
-                        questIdsToFarm.push(questId);
-                        farmQuestIds.add(questId);
-                    }
-                }
-
-                if (questIdsToFarm.length === 0) {
-                    console.log(`Action Replay: All available quests already collected`);
-                    break;
+                const questIdsToFarm = questsToFarm.map(q => +q.id).filter(id => id && !isNaN(id));
+                for (const questId of questIdsToFarm) {
+                    farmQuestIds.add(questId);
                 }
 
                 // Collect each quest individually (one by one)
                 let successfulCount = 0;
-                let failedQuestIds = [];
+                let failedCount = 0;
                 const allSideResults = [];
 
                 for (const questId of questIdsToFarm) {
                     try {
-                        let farmResults;
                         let sideResult = null;
                         
                         // Use Caller if available (HWH standard), otherwise fallback to Send
@@ -977,7 +988,7 @@
                                 name: 'questFarm',
                                 args: { questId },
                             });
-                            farmResults = await farmCaller.send();
+                            const farmResults = await farmCaller.send();
                             const sideResults = farmResults.sideResult('questFarm', true) || [];
                             sideResult = sideResults[0];
                         } else {
@@ -1003,18 +1014,15 @@
 
                         if (sideResult?.error) {
                             const error = sideResult.error;
-                            const errorName = (typeof error === 'object' ? error.name : '') || '';
-                            const errorDesc = (typeof error === 'object' ? error.description : String(error)) || '';
-
-                            if (errorName === 'NotAvailable' ||
-                                errorDesc.includes('not pass farm requirements') ||
-                                errorDesc.includes('not available')) {
-                                failedQuestIds.push(questId);
-                                farmQuestIds.delete(questId);
-                                console.log(`Action Replay: Skipping quest ${questId} - ${errorDesc || errorName}`);
+                            if (isQuestFarmNotAvailableError(error)) {
+                                skippedQuestIds.add(questId);
+                                failedCount++;
+                                console.log(`Action Replay: Skipping quest ${questId} - not farmable (requirements not met)`);
                             } else {
-                                successfulCount++;
-                                allSideResults.push(sideResult);
+                                // Unknown side error — don't treat as success; skip further retries
+                                skippedQuestIds.add(questId);
+                                failedCount++;
+                                console.log(`Action Replay: Skipping quest ${questId} - ${(error && (error.description || error.name)) || 'unknown error'}`);
                             }
                         } else {
                             successfulCount++;
@@ -1023,17 +1031,16 @@
                             }
                         }
                     } catch (error) {
-                        console.error(`Action Replay: Error farming quest ${questId}:`, error);
-                        
-                        const errorMessage = error.message || error.toString() || '';
-                        const isNotAvailableError = errorMessage.includes('NotAvailable') ||
-                            errorMessage.includes('not pass farm requirements') ||
-                            errorMessage.includes('not available');
-
-                        if (isNotAvailableError) {
-                            failedQuestIds.push(questId);
-                            farmQuestIds.delete(questId);
-                            console.log(`Action Replay: Skipping quest ${questId} - ${errorMessage}`);
+                        if (isQuestFarmNotAvailableError(error)) {
+                            // Expected for some state===2 quests (e.g. locked battle-pass / event chains)
+                            skippedQuestIds.add(questId);
+                            failedCount++;
+                            console.log(`Action Replay: Skipping quest ${questId} - not farmable (requirements not met)`);
+                        } else {
+                            // Unexpected error — skip this quest for this run, keep going
+                            skippedQuestIds.add(questId);
+                            failedCount++;
+                            console.warn(`Action Replay: Skipping quest ${questId} after error:`, error?.message || error);
                         }
                     }
 
@@ -1042,16 +1049,17 @@
                 }
 
                 totalCollected += successfulCount;
+                totalSkipped += failedCount;
                 if (successfulCount > 0) {
                     console.log(`Action Replay: Collected ${successfulCount} quest reward(s)`);
                     const { HWHFuncs } = window;
                     HWHFuncs.setProgress(`Action Replay: Collected ${successfulCount} quest reward(s)`, false);
                 }
-                if (failedQuestIds.length > 0) {
-                    console.log(`Action Replay: Skipped ${failedQuestIds.length} quest(s) that don't meet farm requirements`);
+                if (failedCount > 0) {
+                    console.log(`Action Replay: Skipped ${failedCount} quest(s) that don't meet farm requirements`);
                 }
 
-                // Check for newly unlocked quests (only high-ID quests)
+                // Check for newly unlocked quests (only high-ID quests not yet tried/skipped)
                 let hasNewQuests = false;
                 for (const sideResult of allSideResults) {
                     if (!sideResult) continue;
@@ -1060,7 +1068,8 @@
                     for (const quest of quests) {
                         if (quest?.state === 2) {
                             const newQuestId = +quest.id;
-                            if (newQuestId && newQuestId > QUEST_ID_FILTER_THRESHOLD && !farmQuestIds.has(newQuestId)) {
+                            if (newQuestId && newQuestId > QUEST_ID_FILTER_THRESHOLD &&
+                                !farmQuestIds.has(newQuestId) && !skippedQuestIds.has(newQuestId)) {
                                 hasNewQuests = true;
                                 break;
                             }
@@ -1071,6 +1080,7 @@
 
                 await new Promise(resolve => setTimeout(resolve, QUEST_COLLECTION_DELAY * 2));
 
+                // Stop when nothing succeeded and nothing new unlocked
                 if (!hasNewQuests && successfulCount === 0) {
                     break;
                 }
@@ -1081,11 +1091,11 @@
             }
 
             if (totalCollected > 0) {
-                console.log(`Action Replay: Quest collection completed. Total collected: ${totalCollected}`);
+                console.log(`Action Replay: Quest collection completed. Total collected: ${totalCollected}, skipped: ${totalSkipped}`);
                 const { HWHFuncs } = window;
                 HWHFuncs.setProgress(`Action Replay: Quest collection completed. Total collected: ${totalCollected}`, true);
             } else {
-                console.log(`Action Replay: No quest rewards to collect`);
+                console.log(`Action Replay: No quest rewards to collect (skipped ${totalSkipped} not-farmable)`);
             }
 
             return totalCollected;
@@ -1570,6 +1580,7 @@
                 typeLive
             };
             updateHeroTournamentLiveBadge();
+            scheduleHeroTournamentEndAutoCollect();
 
             return { active, ...heroTournamentEventInfo };
         } catch (error) {
@@ -1583,6 +1594,99 @@
 
     function isHeroTournamentLive() {
         return heroTournamentEventActive === true && heroTournamentEventInfo?.type === HERO_TOURNAMENT_TYPE;
+    }
+
+    /** True during the last 5 minutes of Hero Tournament (type=heroes), before endTime. */
+    function isWithinHeroTournamentEndAutoCollectWindow() {
+        const info = heroTournamentEventInfo;
+        if (!info || info.type !== HERO_TOURNAMENT_TYPE || !info.endTime) return false;
+        const now = Math.floor(Date.now() / 1000);
+        const secsUntilEnd = info.endTime - now;
+        return secsUntilEnd >= 0 && secsUntilEnd <= HERO_TOURNAMENT_END_AUTO_COLLECT_SECS;
+    }
+
+    function updateAutoCollectForcedByTournamentUI() {
+        const checkbox = document.getElementById('auto-collect-rewards-checkbox');
+        const labelText = document.getElementById('auto-collect-rewards-label-text');
+        const forced = isWithinHeroTournamentEndAutoCollectWindow();
+        if (checkbox) {
+            if (forced) {
+                checkbox.checked = true;
+            } else {
+                checkbox.checked = autoCollectRewards;
+            }
+        }
+        if (labelText) {
+            labelText.textContent = forced
+                ? '🎁 Auto Collect Quest Rewards (forced ON — Hero Tournament ending in ≤5 min)'
+                : '🎁 Auto Collect Quest Rewards (collects rewards recursively on script load)';
+        }
+    }
+
+    function scheduleHeroTournamentEndAutoCollect() {
+        if (heroTournamentEndAutoCollectTimer) {
+            clearTimeout(heroTournamentEndAutoCollectTimer);
+            heroTournamentEndAutoCollectTimer = null;
+        }
+
+        const info = heroTournamentEventInfo;
+        if (!info || info.type !== HERO_TOURNAMENT_TYPE || !info.endTime) {
+            updateAutoCollectForcedByTournamentUI();
+            return;
+        }
+
+        const windowStartMs = (info.endTime - HERO_TOURNAMENT_END_AUTO_COLLECT_SECS) * 1000;
+        const msUntilWindow = windowStartMs - Date.now();
+
+        if (msUntilWindow > 0) {
+            console.log(`Action Replay: Hero Tournament - Will force quest collect in ${Math.ceil(msUntilWindow / 1000)}s (last 5 min before end)`);
+            heroTournamentEndAutoCollectTimer = setTimeout(() => {
+                heroTournamentEndAutoCollectTimer = null;
+                maybeForceAutoCollectNearHeroTournamentEnd();
+            }, msUntilWindow + 500);
+        }
+
+        updateAutoCollectForcedByTournamentUI();
+    }
+
+    async function maybeForceAutoCollectNearHeroTournamentEnd() {
+        updateAutoCollectForcedByTournamentUI();
+
+        if (!isWithinHeroTournamentEndAutoCollectWindow()) {
+            return;
+        }
+
+        const tournamentId = heroTournamentEventInfo?.id;
+        if (tournamentId != null && heroTournamentEndAutoCollectTournamentId === tournamentId) {
+            return;
+        }
+        if (heroTournamentEndAutoCollectRunning) {
+            return;
+        }
+
+        heroTournamentEndAutoCollectRunning = true;
+        heroTournamentEndAutoCollectTournamentId = tournamentId;
+        try {
+            const secsLeft = heroTournamentEventInfo.endTime - Math.floor(Date.now() / 1000);
+            console.log(`Action Replay: Hero Tournament ending in ${secsLeft}s — forcing Auto Collect Quest Rewards (ignores setting)`);
+            const { HWHFuncs } = window;
+            if (HWHFuncs) {
+                HWHFuncs.setProgress('Action Replay: Event ending soon — auto-collecting quest rewards...', false);
+            }
+            await collectAllQuestRewards();
+            if (HWHFuncs) {
+                HWHFuncs.setProgress('Action Replay: End-of-event quest collect finished', true);
+            }
+        } catch (error) {
+            console.error('Action Replay: Forced end-of-event quest collect failed:', error);
+            // Allow retry on next poll if collection failed
+            if (heroTournamentEndAutoCollectTournamentId === tournamentId) {
+                heroTournamentEndAutoCollectTournamentId = null;
+            }
+        } finally {
+            heroTournamentEndAutoCollectRunning = false;
+            updateAutoCollectForcedByTournamentUI();
+        }
     }
 
     function updateHeroTournamentGoEVisibility() {
@@ -1834,6 +1938,8 @@
         try {
             // Only run tournament actions when the event is live
             const eventState = await getHeroTournamentEventState();
+            // Force quest collect in the last 5 minutes regardless of autoCollectRewards setting
+            await maybeForceAutoCollectNearHeroTournamentEnd();
             if (!eventState.active) {
                 console.log('Action Replay: Hero Tournament - Event not active, skipping actions');
             } else {
@@ -2106,8 +2212,8 @@
                     <span>⚡ Rush Mode (⚠️ CAUTION: May cause ban - runs all recordings simultaneously)</span>
                 </label>
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="auto-collect-rewards-checkbox" ${autoCollectRewards ? 'checked' : ''} style="margin-right: 5px;">
-                    <span>🎁 Auto Collect Quest Rewards (collects rewards recursively on script load)</span>
+                    <input type="checkbox" id="auto-collect-rewards-checkbox" ${autoCollectRewards || isWithinHeroTournamentEndAutoCollectWindow() ? 'checked' : ''} style="margin-right: 5px;">
+                    <span id="auto-collect-rewards-label-text">🎁 Auto Collect Quest Rewards (collects rewards recursively on script load)</span>
                 </label>
             </div>
         `;
@@ -2120,6 +2226,7 @@
 
         // Show cached event status / GoE visibility immediately, then refresh from API
         updateHeroTournamentLiveBadge();
+        updateAutoCollectForcedByTournamentUI();
         getHeroTournamentEventState().catch(() => {});
         
         // Event listeners
@@ -2157,8 +2264,16 @@
             saveSettings();
         });
         document.getElementById('auto-collect-rewards-checkbox').addEventListener('change', (e) => {
+            // During last 5 min of Hero Tournament, keep forced ON regardless of user toggle
+            if (isWithinHeroTournamentEndAutoCollectWindow()) {
+                e.target.checked = true;
+                updateAutoCollectForcedByTournamentUI();
+                console.log('Action Replay: Auto Collect is forced ON while Hero Tournament is ending (≤5 min)');
+                return;
+            }
             autoCollectRewards = e.target.checked;
             saveSettings();
+            updateAutoCollectForcedByTournamentUI();
         });
         document.getElementById('winterfest-mode-checkbox').addEventListener('change', (e) => {
             winterfestMode = e.target.checked;
