@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.2
+// @version      3.0.3
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -2880,7 +2880,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.3.0";
+    const EXTENSION_VERSION = "2.3.1";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -3634,6 +3634,7 @@
         let anyDead = false;
         let fullHealth = true;
         let heroChecked = false;
+        const deadNames = [];
 
         for (const unit of Object.values(units)) {
             const id = Number(unit?.id);
@@ -3652,13 +3653,17 @@
             const hp = state.hp != null ? Number(state.hp) : null;
             const maxHp = state.maxHp != null ? Number(state.maxHp) : null;
             const isDead = state.isDead === true || (hp != null && hp <= 0);
-            if (isDead) anyDead = true;
+            const name = aocUnitName(id);
+            if (isDead) {
+                anyDead = true;
+                deadNames.push(name);
+            }
             if (hp != null && maxHp != null && maxHp > 0 && hp < maxHp) fullHealth = false;
             if (hp != null || maxHp != null) heroChecked = true;
 
             heroes.push({
                 id,
-                name: aocUnitName(id),
+                name,
                 power: unit.power ?? null,
                 hp,
                 maxHp,
@@ -3691,6 +3696,7 @@
             bannerSlots,
             fullHealth: heroChecked ? fullHealth && !anyDead : null,
             anyDead,
+            deadNames,
             lineupLabel: heroes.map((h) => h.name).join(', ') || 'Unknown',
             petLabel: pet?.name || '—',
             bannerLabel: banner?.id != null
@@ -3759,6 +3765,7 @@
                             bannerSlots: [],
                             fullHealth: null,
                             anyDead: null,
+                            deadNames: [],
                             powerSum: null,
                             lineupLabel: '(no team data)',
                             petLabel: '—',
@@ -3786,6 +3793,7 @@
                         bannerSlots: [],
                         fullHealth: null,
                         anyDead: null,
+                        deadNames: [],
                         powerSum: null,
                         lineupLabel: '(fetch failed)',
                         petLabel: '—',
@@ -3807,12 +3815,23 @@
         if (enemyTownDefenses && enemyTownDefenses.length > 0) {
             let tableRows = '';
             enemyTownDefenses.forEach((row) => {
-                const healthLabel = row.unavailable
-                    ? 'N/A'
-                    : [
-                        row.fullHealth === true ? 'Full HP' : (row.fullHealth === false ? 'Damaged' : 'Unknown'),
-                        row.anyDead ? '· Dead in lineup' : '· No dead',
-                    ].join(' ');
+                const deadList = Array.isArray(row.deadNames) ? row.deadNames.filter(Boolean) : [];
+                const healthParts = [];
+                if (row.unavailable) {
+                    healthParts.push('N/A');
+                } else {
+                    healthParts.push(
+                        row.fullHealth === true ? 'Full HP' : (row.fullHealth === false ? 'Damaged' : 'Unknown')
+                    );
+                    if (row.anyDead && deadList.length) {
+                        healthParts.push(`Dead: ${deadList.join(', ')}`);
+                    } else if (row.anyDead) {
+                        healthParts.push('Dead: (unknown)');
+                    } else {
+                        healthParts.push('No dead');
+                    }
+                }
+                const healthLabel = healthParts.join('<br>');
                 const healthClass = row.anyDead
                     ? 'town-health-dead'
                     : (row.fullHealth ? 'town-health-full' : 'town-health-dmg');
@@ -3836,8 +3855,8 @@
             return `
                 <div class="aoc-clan-stats" id="enemy-towns-section">
                     <div class="aoc-clan-stats-header">
-                        <div class="aoc-clan-stats-title">Occupied Enemy Towns (${enemyTownDefenses.length})</div>
-                        <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Refresh occupied enemy towns">🔄 Refresh</button>
+                        <div class="aoc-clan-stats-title">Visible Enemy Towns (${enemyTownDefenses.length})</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Refresh visible enemy towns">🔄 Refresh</button>
                     </div>
                     <table class="aoc-clan-stats-table aoc-enemy-towns-table">
                         <thead>
@@ -3859,12 +3878,12 @@
         return `
             <div class="aoc-clan-stats" id="enemy-towns-section">
                 <div class="aoc-clan-stats-header">
-                    <div class="aoc-clan-stats-title">Occupied Enemy Towns</div>
-                    <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Load occupied enemy towns">🔄 Load</button>
+                    <div class="aoc-clan-stats-title">Visible Enemy Towns</div>
+                    <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Load visible enemy towns">🔄 Load</button>
                 </div>
                 <div class="aoc-clan-stats-loading">${
                     enemyTownDefenses && enemyTownDefenses.length === 0
-                        ? 'No enemy-occupied farm towns found.'
+                        ? 'No visible enemy farm towns found.'
                         : 'Enemy town defenses not loaded. Click "Load" to fetch.'
                 }</div>
             </div>
