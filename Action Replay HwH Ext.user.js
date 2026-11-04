@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.8
+// @version      3.0.9
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -2880,7 +2880,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.3.6";
+    const EXTENSION_VERSION = "2.3.7";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -2906,12 +2906,15 @@
     let enemyTownDefenses = null; // Merged current + recently-seen enemy farm towns
     let enemyTownRefreshInFlight = false;
     let enemyTownAutoRefreshTimer = null;
+    let enemyTownUiRerender = null; // optional callback while AOC menu is open
+    let aocEventGate = { active: null, checkedAt: 0 };
 
     // --- STORAGE KEYS ---
     const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
     const STORAGE_ENEMY_TOWNS = 'aocAutoMovement_enemyTownHistory';
     const ENEMY_TOWN_HISTORY_TTL_MS = 3 * 60 * 60 * 1000; // drop tiles last seen > 3h
     const ENEMY_TOWN_AUTO_REFRESH_MS = 15000;
+    const AOC_EVENT_GATE_TTL_MS = 120000;
 
     // --- AOC API CALLS TO RECORD ---
     const AOC_API_CALLS = new Set([
@@ -3126,7 +3129,7 @@
         scheduleAutoRuns();
         loadClanStats(); // Load clan stats on initialization
         syncEnemyTownDefensesFromHistory(); // hydrate recent tile history before scan
-        loadEnemyTownDefenses(); // Prefetch occupied enemy farm towns
+        startEnemyTownBackgroundRefresh(); // scan while AOC event is live (not only menu-open)
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -3900,6 +3903,72 @@
         return pruned;
     }
 
+    function notifyEnemyTownUi() {
+        if (typeof enemyTownUiRerender === 'function') {
+            try {
+                enemyTownUiRerender();
+            } catch (error) {
+                console.warn('AOC: enemy town UI refresh failed:', error);
+            }
+        }
+    }
+
+    function markAocEventGate(active) {
+        aocEventGate = { active: !!active, checkedAt: Date.now() };
+        return aocEventGate.active;
+    }
+
+    function isAocEventActiveFromInfo(info) {
+        if (!info || typeof info !== 'object') return false;
+        const mapId = Number(info.mapId);
+        if (!Number.isFinite(mapId) || mapId <= 0) return false;
+        const endRaw = Number(
+            info.seasonEndTime
+            ?? info.endTime
+            ?? info.farmEndTime
+            ?? info.eventEndTime
+            ?? 0
+        );
+        if (Number.isFinite(endRaw) && endRaw > 0) {
+            const endMs = endRaw < 1e12 ? endRaw * 1000 : endRaw;
+            return endMs > Date.now();
+        }
+        return true;
+    }
+
+    async function isAocEventActive(force = false) {
+        const now = Date.now();
+        if (!force && aocEventGate.active != null && (now - aocEventGate.checkedAt) < AOC_EVENT_GATE_TTL_MS) {
+            return aocEventGate.active;
+        }
+        try {
+            const { Send } = window;
+            if (!Send) return markAocEventGate(false);
+            const response = await Send({
+                calls: [{
+                    name: 'clanDomination_getInfo',
+                    args: {},
+                    context: { actionTs: Math.floor(performance.now()) },
+                    ident: 'aocEventProbe',
+                }],
+            });
+            const result = response?.results?.find((r) => r.ident === 'aocEventProbe')
+                || response?.results?.find((r) => r.ident === 'body')
+                || response?.results?.[0];
+            if (result?.result?.error || response?.error) {
+                return markAocEventGate(false);
+            }
+            const info = result?.result?.response;
+            if (info?.mapId != null) {
+                window.__aocLiveMapId = Number(info.mapId);
+            }
+            return markAocEventGate(isAocEventActiveFromInfo(info));
+        } catch (error) {
+            console.warn('AOC: event probe failed:', error);
+            return markAocEventGate(false);
+        }
+    }
+
     async function loadEnemyTownDefenses() {
         // Prevent Arena Counter Suggest from treating these bulk getEnemyTeams
         // calls as map-click target changes (opens Counter · Domination panel).
@@ -3909,12 +3978,16 @@
             const { Send } = window;
             if (!Send) {
                 syncEnemyTownDefensesFromHistory();
+                notifyEnemyTownUi();
                 return;
             }
 
             const [mapState, liveMapId] = await Promise.all([getMapState(), getLiveMapId()]);
             if (!mapState?.townPositions) {
+                // mapState missing usually means the AOC season is not available.
+                markAocEventGate(false);
                 syncEnemyTownDefensesFromHistory();
+                notifyEnemyTownUi();
                 return;
             }
 
@@ -4031,11 +4104,14 @@
             const pruned = pruneEnemyTownHistory(history, nowMs);
             saveEnemyTownHistory(pruned);
             enemyTownDefenses = enemyTownHistoryToList(pruned, nowMs);
+            markAocEventGate(true);
             const currentCount = enemyTownDefenses.filter((r) => r.visible).length;
             console.log(`AOC: Enemy towns — ${currentCount} current, ${enemyTownDefenses.length} tracked`);
+            notifyEnemyTownUi();
         } catch (error) {
             console.error('AOC: Error loading enemy town defenses:', error);
             syncEnemyTownDefensesFromHistory();
+            notifyEnemyTownUi();
         } finally {
             window.__ahSuppressCounterSuggestCdIngest = previousSuppress;
         }
@@ -4139,22 +4215,41 @@
         `;
     }
 
-    function stopEnemyTownAutoRefresh() {
+    function stopEnemyTownBackgroundRefresh() {
         if (enemyTownAutoRefreshTimer) {
             clearInterval(enemyTownAutoRefreshTimer);
             enemyTownAutoRefreshTimer = null;
         }
     }
 
-    function startEnemyTownAutoRefresh(refreshFn) {
-        stopEnemyTownAutoRefresh();
-        if (typeof refreshFn !== 'function') return;
-        enemyTownAutoRefreshTimer = setInterval(() => {
-            if (!document.getElementById('enemy-towns-section')) {
-                stopEnemyTownAutoRefresh();
-                return;
+    async function refreshEnemyTownData(opts = {}) {
+        const force = !!opts?.force;
+        if (enemyTownRefreshInFlight) return false;
+        enemyTownRefreshInFlight = true;
+        try {
+            const active = await isAocEventActive(force);
+            if (!active && !force) {
+                syncEnemyTownDefensesFromHistory();
+                notifyEnemyTownUi();
+                return false;
             }
-            refreshFn({ silent: true });
+            await loadEnemyTownDefenses();
+            return true;
+        } finally {
+            enemyTownRefreshInFlight = false;
+        }
+    }
+
+    function startEnemyTownBackgroundRefresh() {
+        stopEnemyTownBackgroundRefresh();
+        // Immediate pass, then every 15s while AOC season/event is live.
+        refreshEnemyTownData({ force: false }).catch((error) => {
+            console.warn('AOC: initial enemy town refresh failed:', error);
+        });
+        enemyTownAutoRefreshTimer = setInterval(() => {
+            refreshEnemyTownData({ force: false }).catch((error) => {
+                console.warn('AOC: background enemy town refresh failed:', error);
+            });
         }, ENEMY_TOWN_AUTO_REFRESH_MS);
     }
 
@@ -4922,7 +5017,6 @@
         const { HWHFuncs } = window;
         
         if (document.getElementById('aoc-popup-container')) return;
-        stopEnemyTownAutoRefresh();
         syncEnemyTownDefensesFromHistory();
 
         const styles = `
@@ -5191,28 +5285,22 @@
             const newBtn = document.getElementById('refresh-enemy-towns-btn');
             if (newBtn) newBtn.addEventListener('click', () => refreshEnemyTowns());
         };
+        enemyTownUiRerender = rerenderEnemyTownsSection;
 
-        const refreshEnemyTowns = async (opts = {}) => {
-            const silent = !!opts?.silent;
-            if (enemyTownRefreshInFlight) return;
-            if (!document.getElementById('enemy-towns-section')) {
-                stopEnemyTownAutoRefresh();
-                return;
-            }
-
-            enemyTownRefreshInFlight = true;
+        const refreshEnemyTowns = async () => {
             const btn = document.getElementById('refresh-enemy-towns-btn');
-            if (btn && !silent) {
+            if (btn) {
                 btn.disabled = true;
                 btn.textContent = '⏳ Loading...';
             }
             try {
-                await loadEnemyTownDefenses();
+                // Manual refresh bypasses the event-gate cache.
+                aocEventGate = { active: null, checkedAt: 0 };
+                await refreshEnemyTownData({ force: true });
                 if (document.getElementById('enemy-towns-section')) {
                     rerenderEnemyTownsSection();
                 }
             } finally {
-                enemyTownRefreshInFlight = false;
                 const liveBtn = document.getElementById('refresh-enemy-towns-btn');
                 if (liveBtn) {
                     liveBtn.disabled = false;
@@ -5225,10 +5313,11 @@
         if (enemyTownsBtn) {
             enemyTownsBtn.addEventListener('click', () => refreshEnemyTowns());
         }
-        startEnemyTownAutoRefresh(refreshEnemyTowns);
 
         const closeAocPopup = () => {
-            stopEnemyTownAutoRefresh();
+            if (enemyTownUiRerender === rerenderEnemyTownsSection) {
+                enemyTownUiRerender = null;
+            }
             backdrop.remove();
         };
 
