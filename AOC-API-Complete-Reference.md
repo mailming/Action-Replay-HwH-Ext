@@ -123,7 +123,7 @@ Retrieves the current state of the Clan Domination map, including map regions, l
 | `map.levels[0].id` | integer | **Starting base level ID** |
 | `townPositions` | object | Object keyed by position number, containing town/tower position data |
 | `townPositions[position].position` | integer | Position number on the map |
-| `townPositions[position].townId` | integer | Town ID |
+| `townPositions[position].townId` | integer | **Farm tier** (not the display name). Controls reward rate; values depend on `mapId` (map 3 uses tiers 1–5, map 4 uses 6–10) |
 | `townPositions[position].status` | integer | Status of the town (1 = occupied) |
 | `townPositions[position].userId` | integer | User ID occupying the town (0 = empty, non-zero = occupied) |
 | `townPositions[position].farmStart` | integer | Timestamp when farming started |
@@ -548,31 +548,128 @@ Upgrades the clan castle by contributing coins.
 
 ## Important Coordinates
 
+### Map Versions (`mapId`)
+
+AOC seasons use different map layouts. Read the live map from `clanDomination_getInfo.mapId`.
+
+| mapId | Asset | Town count | Farm tiers (`townId`) | Notes |
+|------:|-------|------------:|------------------------|-------|
+| **3** | `clan_domination_map` | 35 | 1–5 | Current hero map (common) |
+| **4** | `clan_domination_map` | 35 | 6–10 | Alternate / titan-style seasons |
+
+Castles are shared on both maps: `662, 665, 693, 696`.
+
+**How town display names are resolved**
+
+1. Load `tiledMap.list[mapId].map.mapExtraData.townLevels`
+2. Sort town tile `levelId`s ascending
+3. Name = `CLAN_DOMINATION_TOWN_{rank}` (1-based rank in that sorted list)
+4. API `townPositions[levelId].townId` is the **farm tier** only (reward/min), not the name index
+
+Season client data uses `"locale": { "townNamePrefix": "CLAN_DOMINATION_TOWN" }`.
+
 ### Base Positions
 
 | Base | Level ID | Description |
 |------|----------|-------------|
 | **Left Upper Base** | 693 | Starting position for left upper base |
 | **Right Bottom Base** | 696 | Starting position for right bottom base |
+| **Other castles** | 662, 665 | Additional clan castle tiles |
 
-### Key Locations
+### Town Names by Tile — mapId `3`
 
-| Location | Level ID | Description |
-|----------|----------|-------------|
-| **Midtown** | 1 | Central town location (main objective) |
-| **Verdant** | 123 | Verdant location |
-| **Monbridge** | 112 | Monbridge location |
-| **Moongrave** | 359 | Moongrave location |
+| Tile | Name | Farm tier (`townId`) | Reward / min |
+|-----:|------|---------------------:|-------------:|
+| 1 | Midtown | 5 | 32 |
+| 26 | Frado | 3 | 4 |
+| 29 | Wrand | 3 | 4 |
+| 33 | Kiaton | 3 | 4 |
+| 36 | Himdale | 3 | 4 |
+| 98 | Skullmore | 4 | 8 |
+| 101 | Joria | 4 | 8 |
+| 112 | Monbridge | 4 | 8 |
+| 115 | Heless | 4 | 8 |
+| 123 | Verdant | 4 | 8 |
+| 126 | Drakemore | 4 | 8 |
+| 333 | Lorenndor | 3 | 4 |
+| 336 | Uggario | 3 | 4 |
+| 340 | Offord | 2 | 2 |
+| 343 | Lordarone | 2 | 2 |
+| 356 | Cradena | 1 | 1 |
+| 359 | Moongrave | 1 | 1 |
+| 375 | Lando | 1 | 1 |
+| 378 | Stramguard | 1 | 1 |
+| 394 | Viaton | 2 | 2 |
+| 397 | Avelew | 2 | 2 |
+| 404 | Galador | 1 | 1 |
+| 407 | Everfort | 1 | 1 |
+| 423 | Fjemark | 2 | 2 |
+| 426 | Odenguard | 2 | 2 |
+| 436 | Slapdale | 3 | 4 |
+| 439 | Cristallion | 3 | 4 |
+| 446 | Uleyim | 2 | 2 |
+| 449 | Shadowmoore | 2 | 2 |
+| 465 | Dalemont | 1 | 1 |
+| 468 | Forgale | 1 | 1 |
+| 585 | Cleabert | 1 | 1 |
+| 588 | Morpork | 1 | 1 |
+| 596 | Arcania | 1 | 1 |
+| 599 | Terranore | 1 | 1 |
 
-### Tower Positions
+**mapId 3 town tiles:**
+`1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 397, 404, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596, 599`
 
-Tower positions are locations that can be occupied. When moving to a tower:
-- If `userId` is 0: Tower is empty, move to occupy it
-- If `userId` matches your clan: Tower is occupied by teammate, skip
-- If `userId` is different clan: Tower is occupied by enemy, attack first
+### Town Names by Tile — mapId `4`
 
-**All 32 Tower Positions:**
-`1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596`
+| Tile | Name | Farm tier (`townId`) | Reward / min |
+|-----:|------|---------------------:|-------------:|
+| 1 | Midtown | 10 | 32 |
+| 39 | Frado | 9 | 8 |
+| 42 | Wrand | 9 | 8 |
+| 52 | Kiaton | 9 | 8 |
+| 55 | Himdale | 9 | 8 |
+| 98 | Skullmore | 8 | 4 |
+| 101 | Joria | 8 | 4 |
+| 112 | Monbridge | 8 | 4 |
+| 115 | Heless | 8 | 4 |
+| 123 | Verdant | 8 | 4 |
+| 126 | Drakemore | 8 | 4 |
+| 285 | Lorenndor | 7 | 3 |
+| 288 | Uggario | 7 | 3 |
+| 292 | Offord | 7 | 3 |
+| 295 | Lordarone | 7 | 3 |
+| 316 | Cradena | 7 | 3 |
+| 319 | Moongrave | 7 | 3 |
+| 320 | Lando | 7 | 3 |
+| 323 | Stramguard | 7 | 3 |
+| 405 | Viaton | 7 | 3 |
+| 408 | Avelew | 7 | 3 |
+| 410 | Galador | 6 | 1 |
+| 413 | Everfort | 6 | 1 |
+| 459 | Fjemark | 6 | 1 |
+| 462 | Odenguard | 6 | 1 |
+| 464 | Slapdale | 7 | 3 |
+| 467 | Cristallion | 7 | 3 |
+| 496 | Uleyim | 7 | 3 |
+| 499 | Shadowmoore | 7 | 3 |
+| 506 | Dalemont | 6 | 1 |
+| 509 | Forgale | 6 | 1 |
+| 513 | Cleabert | 6 | 1 |
+| 516 | Morpork | 6 | 1 |
+| 526 | Arcania | 7 | 3 |
+| 529 | Terranore | 7 | 3 |
+
+**mapId 4 town tiles:**
+`1, 39, 42, 52, 55, 98, 101, 112, 115, 123, 126, 285, 288, 292, 295, 316, 319, 320, 323, 405, 408, 410, 413, 459, 462, 464, 467, 496, 499, 506, 509, 513, 516, 526, 529`
+
+### Tower / Town Occupancy
+
+Town/tower tiles can be occupied. When moving to one:
+- If `userId` is 0 / missing: empty → move to occupy
+- If `userId` is your clan: teammate → skip
+- If `userId` is another clan: enemy → attack first, then move
+
+Always resolve the town list from the live `mapId` (do not hardcode map 3 tiles when the season is on map 4).
 
 ---
 

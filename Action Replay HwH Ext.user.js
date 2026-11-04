@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.3
+// @version      3.0.8
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -2880,7 +2880,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.3.1";
+    const EXTENSION_VERSION = "2.3.6";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -2903,10 +2903,15 @@
     let currentlyPlayingRecordingId = null;
     let recordingAborted = false;
     let clanStats = null; // Store all clan stats: [{ clanId, clanName, power, serverId, coins }, ...]
-    let enemyTownDefenses = null; // Occupied enemy farm towns with defense details
+    let enemyTownDefenses = null; // Merged current + recently-seen enemy farm towns
+    let enemyTownRefreshInFlight = false;
+    let enemyTownAutoRefreshTimer = null;
 
     // --- STORAGE KEYS ---
     const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
+    const STORAGE_ENEMY_TOWNS = 'aocAutoMovement_enemyTownHistory';
+    const ENEMY_TOWN_HISTORY_TTL_MS = 3 * 60 * 60 * 1000; // drop tiles last seen > 3h
+    const ENEMY_TOWN_AUTO_REFRESH_MS = 15000;
 
     // --- AOC API CALLS TO RECORD ---
     const AOC_API_CALLS = new Set([
@@ -3120,6 +3125,7 @@
         updatePlayAllButton();
         scheduleAutoRuns();
         loadClanStats(); // Load clan stats on initialization
+        syncEnemyTownDefensesFromHistory(); // hydrate recent tile history before scan
         loadEnemyTownDefenses(); // Prefetch occupied enemy farm towns
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
@@ -3505,6 +3511,35 @@
         }
     }
 
+    async function getLiveMapId() {
+        try {
+            const { Send } = window;
+            if (!Send) return getLiveClanDominationMapId();
+            const response = await Send({
+                calls: [{
+                    name: 'clanDomination_getInfo',
+                    args: {},
+                    context: { actionTs: Math.floor(performance.now()) },
+                    ident: 'body',
+                }],
+            });
+            const result = response?.results?.find((r) => r.ident === 'body');
+            const mapId = Number(result?.result?.response?.mapId);
+            if (Number.isFinite(mapId) && mapId > 0) {
+                window.__aocLiveMapId = mapId;
+                // Invalidate name cache when map changes.
+                if (cachedTownNameMapId !== mapId) {
+                    cachedTownNameByLevel = null;
+                    cachedTownNameMapId = null;
+                }
+                return mapId;
+            }
+        } catch (error) {
+            console.warn('AOC: getLiveMapId failed:', error);
+        }
+        return getLiveClanDominationMapId();
+    }
+
     async function loadClanStats() {
         try {
             const { Send } = window;
@@ -3588,6 +3623,97 @@
         }
         if (id >= 6000 && id < 7000) return PET_NAMES[id] || `Pet ${id}`;
         return `Hero ${id}`;
+    }
+
+    // Town display names:
+    // - API townId = farm tier (reward rate), map-specific (map3: 1..5, map4: 6..10)
+    // - Map label = CLAN_DOMINATION_TOWN_{rank} where rank is 1-based index of levelId
+    //   in that map's townLevels keys sorted ascending (Midtown/level 1 is always rank 1).
+    let cachedTownNameByLevel = null; // { mapId, byLevel: Map/Record }
+    let cachedTownNameMapId = null;
+
+    function getLiveClanDominationMapId() {
+        try {
+            const list = window.lib?.data?.clanDomination?.list;
+            // Prefer explicit live map from recent getInfo if stored on window by gameplay.
+            if (window.__aocLiveMapId) return Number(window.__aocLiveMapId);
+            // Fallback: current season entry often matches latest mapId 3/4 in list requirements.
+            if (list && typeof list === 'object') {
+                // Caller may not have getInfo cached; default to 3 (current common hero map).
+                return 3;
+            }
+        } catch {
+            // ignore
+        }
+        return 3;
+    }
+
+    function buildTownNameMapForMapId(mapId) {
+        const byLevel = {};
+        try {
+            const townLevels = window.lib?.data?.tiledMap?.list?.[String(mapId)]?.map?.mapExtraData?.townLevels
+                || window.lib?.data?.tiledMap?.list?.[mapId]?.map?.mapExtraData?.townLevels
+                || {};
+            const sortedLevelIds = Object.keys(townLevels)
+                .map(Number)
+                .filter((id) => Number.isFinite(id) && id > 0)
+                .sort((a, b) => a - b);
+
+            const prefix = 'CLAN_DOMINATION_TOWN';
+            sortedLevelIds.forEach((levelId, index) => {
+                const rank = index + 1; // 1-based
+                let name = null;
+                try {
+                    const key = `${prefix}_${rank}`;
+                    const translated = window.cheats?.translate?.(key);
+                    if (translated && translated !== key) name = translated;
+                } catch {
+                    // ignore
+                }
+                byLevel[levelId] = {
+                    name,
+                    rank,
+                    farmTier: Number(townLevels[String(levelId)] ?? townLevels[levelId]) || null,
+                };
+            });
+        } catch (error) {
+            console.warn('AOC: buildTownNameMapForMapId failed:', error);
+        }
+        return byLevel;
+    }
+
+    function getTownNameMap(mapId = null) {
+        const resolvedMapId = Number(mapId) || getLiveClanDominationMapId();
+        if (cachedTownNameByLevel && cachedTownNameMapId === resolvedMapId) {
+            return cachedTownNameByLevel;
+        }
+        cachedTownNameMapId = resolvedMapId;
+        cachedTownNameByLevel = buildTownNameMapForMapId(resolvedMapId);
+        return cachedTownNameByLevel;
+    }
+
+    function aocTownName(levelId, mapId = null) {
+        const id = Number(levelId);
+        if (!Number.isFinite(id) || id <= 0) return null;
+        const entry = getTownNameMap(mapId)[id];
+        return entry?.name || null;
+    }
+
+    function aocTownFarmReward(townId) {
+        const id = Number(townId);
+        if (!Number.isFinite(id) || id <= 0) return null;
+        try {
+            const town = window.lib?.data?.clanDomination?.town?.[String(id)]
+                || window.lib?.data?.clanDomination?.town?.[id];
+            const coin = town?.farmReward?.coin;
+            if (coin && typeof coin === 'object') {
+                const amount = Object.values(coin).map(Number).find((n) => Number.isFinite(n));
+                if (amount != null) return amount;
+            }
+        } catch {
+            // fall through
+        }
+        return null;
     }
 
     function findClanIdForUser(userId, mapState) {
@@ -3684,9 +3810,13 @@
                 .filter((n) => Number.isFinite(n));
         }
 
+        const townId = townInfo.townId ?? null;
+        const resolvedLevelId = Number(levelId);
         return {
-            levelId: Number(levelId),
-            townId: townInfo.townId ?? null,
+            levelId: resolvedLevelId,
+            townId,
+            townName: aocTownName(resolvedLevelId),
+            farmReward: aocTownFarmReward(townId),
             farmStart: townInfo.farmStart ?? null,
             userId: String(entry?.userId ?? townInfo.userId ?? ''),
             powerSum: entry?.defense?.powerSum ?? null,
@@ -3705,22 +3835,92 @@
         };
     }
 
+    function loadEnemyTownHistory() {
+        try {
+            const { HWHFuncs } = window;
+            const raw = HWHFuncs?.getSaveVal?.(STORAGE_ENEMY_TOWNS, {}) || {};
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+            return raw;
+        } catch {
+            return {};
+        }
+    }
+
+    function saveEnemyTownHistory(history) {
+        try {
+            const { HWHFuncs } = window;
+            if (HWHFuncs?.setSaveVal) {
+                HWHFuncs.setSaveVal(STORAGE_ENEMY_TOWNS, history || {});
+            }
+        } catch (error) {
+            console.warn('AOC: Failed to save enemy town history:', error);
+        }
+    }
+
+    function pruneEnemyTownHistory(history, nowMs = Date.now()) {
+        const next = {};
+        for (const [key, row] of Object.entries(history || {})) {
+            if (!row || typeof row !== 'object') continue;
+            const lastSeen = Number(row.lastSeen);
+            if (!Number.isFinite(lastSeen)) continue;
+            if (nowMs - lastSeen > ENEMY_TOWN_HISTORY_TTL_MS) continue;
+            next[key] = row;
+        }
+        return next;
+    }
+
+    function formatEnemyTownSeenLabel(row, nowMs = Date.now()) {
+        if (row?.visible) return 'current';
+        const lastSeen = Number(row?.lastSeen);
+        if (!Number.isFinite(lastSeen)) return '—';
+        const sec = Math.max(0, Math.floor((nowMs - lastSeen) / 1000));
+        if (sec < 60) return `${sec}s ago`;
+        const min = Math.floor(sec / 60);
+        if (min < 60) return `${min}m ago`;
+        const hr = Math.floor(min / 60);
+        const remMin = min % 60;
+        if (hr < 48) return remMin ? `${hr}h ${remMin}m ago` : `${hr}h ago`;
+        const days = Math.floor(hr / 24);
+        return `${days}d ago`;
+    }
+
+    function enemyTownHistoryToList(history, nowMs = Date.now()) {
+        const pruned = pruneEnemyTownHistory(history, nowMs);
+        return Object.values(pruned).sort((a, b) => {
+            if (!!a.visible !== !!b.visible) return a.visible ? -1 : 1;
+            if (a.visible && b.visible) return Number(a.levelId) - Number(b.levelId);
+            return Number(b.lastSeen || 0) - Number(a.lastSeen || 0);
+        });
+    }
+
+    function syncEnemyTownDefensesFromHistory(history = loadEnemyTownHistory()) {
+        const nowMs = Date.now();
+        const pruned = pruneEnemyTownHistory(history, nowMs);
+        enemyTownDefenses = enemyTownHistoryToList(pruned, nowMs);
+        return pruned;
+    }
+
     async function loadEnemyTownDefenses() {
+        // Prevent Arena Counter Suggest from treating these bulk getEnemyTeams
+        // calls as map-click target changes (opens Counter · Domination panel).
+        const previousSuppress = window.__ahSuppressCounterSuggestCdIngest;
+        window.__ahSuppressCounterSuggestCdIngest = true;
         try {
             const { Send } = window;
             if (!Send) {
-                enemyTownDefenses = [];
+                syncEnemyTownDefensesFromHistory();
                 return;
             }
 
-            const mapState = await getMapState();
+            const [mapState, liveMapId] = await Promise.all([getMapState(), getLiveMapId()]);
             if (!mapState?.townPositions) {
-                enemyTownDefenses = [];
+                syncEnemyTownDefensesFromHistory();
                 return;
             }
 
             const playerClanId = resolvePlayerClanId(mapState);
             const occupiedEnemyTowns = [];
+            getTownNameMap(liveMapId); // warm cache for this map version
 
             for (const [levelIdStr, townInfo] of Object.entries(mapState.townPositions)) {
                 const levelId = Number(levelIdStr);
@@ -3735,29 +3935,39 @@
                     levelId,
                     userId: String(userId),
                     townId: townInfo.townId ?? null,
+                    townName: aocTownName(levelId, liveMapId),
+                    farmReward: aocTownFarmReward(townInfo.townId),
                     farmStart: townInfo.farmStart ?? null,
                     clanId: occupantClanId,
                     clanName: (occupantClanId && mapState.clans?.[occupantClanId]?.title) || null,
+                    mapId: liveMapId,
                 });
             }
 
             occupiedEnemyTowns.sort((a, b) => a.levelId - b.levelId);
-            const details = [];
+            const nowMs = Date.now();
+            const history = pruneEnemyTownHistory(loadEnemyTownHistory(), nowMs);
+            const visibleLevelIds = new Set();
 
             for (const town of occupiedEnemyTowns) {
+                const key = String(town.levelId);
+                visibleLevelIds.add(key);
+                let detail;
                 try {
                     const response = await Send({
                         calls: [{
                             name: 'clanDomination_getEnemyTeams',
                             args: { levelId: town.levelId },
                             context: { actionTs: Math.floor(performance.now()) },
-                            ident: 'body',
+                            ident: 'aocEnemyTownScan',
                         }],
                     });
-                    const result = response?.results?.find((r) => r.ident === 'body');
+                    const result = response?.results?.find((r) => r.ident === 'aocEnemyTownScan')
+                        || response?.results?.find((r) => r.ident === 'body')
+                        || response?.results?.[0];
                     const list = result?.result?.response;
                     if (!Array.isArray(list) || list.length === 0) {
-                        details.push({
+                        detail = {
                             ...town,
                             heroes: [],
                             pet: null,
@@ -3771,21 +3981,21 @@
                             petLabel: '—',
                             bannerLabel: '—',
                             unavailable: true,
-                        });
-                        continue;
+                        };
+                    } else {
+                        const entry = list.find((row) => String(row?.userId) === String(town.userId)) || list[0];
+                        const parsed = parseEnemyTownDefenseEntry(entry, town.levelId, town);
+                        detail = {
+                            ...parsed,
+                            clanId: town.clanId,
+                            clanName: town.clanName,
+                            mapId: town.mapId,
+                            unavailable: false,
+                        };
                     }
-
-                    const entry = list.find((row) => String(row?.userId) === String(town.userId)) || list[0];
-                    const parsed = parseEnemyTownDefenseEntry(entry, town.levelId, town);
-                    details.push({
-                        ...parsed,
-                        clanId: town.clanId,
-                        clanName: town.clanName,
-                        unavailable: false,
-                    });
                 } catch (error) {
                     console.warn(`AOC: Failed to load enemy team at town ${town.levelId}:`, error);
-                    details.push({
+                    detail = {
                         ...town,
                         heroes: [],
                         pet: null,
@@ -3799,22 +4009,46 @@
                         petLabel: '—',
                         bannerLabel: '—',
                         unavailable: true,
-                    });
+                    };
+                }
+
+                // Same tile: replace prior occupant with the current one.
+                history[key] = {
+                    ...detail,
+                    levelId: town.levelId,
+                    userId: String(detail.userId || town.userId),
+                    visible: true,
+                    lastSeen: nowMs,
+                };
+            }
+
+            for (const [key, row] of Object.entries(history)) {
+                if (!visibleLevelIds.has(key)) {
+                    history[key] = { ...row, visible: false };
                 }
             }
 
-            enemyTownDefenses = details;
-            console.log(`AOC: Loaded ${details.length} occupied enemy town defense(s)`);
+            const pruned = pruneEnemyTownHistory(history, nowMs);
+            saveEnemyTownHistory(pruned);
+            enemyTownDefenses = enemyTownHistoryToList(pruned, nowMs);
+            const currentCount = enemyTownDefenses.filter((r) => r.visible).length;
+            console.log(`AOC: Enemy towns — ${currentCount} current, ${enemyTownDefenses.length} tracked`);
         } catch (error) {
             console.error('AOC: Error loading enemy town defenses:', error);
-            enemyTownDefenses = [];
+            syncEnemyTownDefensesFromHistory();
+        } finally {
+            window.__ahSuppressCounterSuggestCdIngest = previousSuppress;
         }
     }
 
     function buildEnemyTownDefensesHtml() {
-        if (enemyTownDefenses && enemyTownDefenses.length > 0) {
+        const nowMs = Date.now();
+        const rows = Array.isArray(enemyTownDefenses) ? enemyTownDefenses : [];
+        const currentCount = rows.filter((r) => r.visible).length;
+
+        if (rows.length > 0) {
             let tableRows = '';
-            enemyTownDefenses.forEach((row) => {
+            rows.forEach((row) => {
                 const deadList = Array.isArray(row.deadNames) ? row.deadNames.filter(Boolean) : [];
                 const healthParts = [];
                 if (row.unavailable) {
@@ -3838,30 +4072,45 @@
                 const power = row.powerSum != null ? Number(row.powerSum).toLocaleString() : '';
                 const userCell = row.clanName
                     ? `${row.userId}<div class="town-clan">${row.clanName}</div>`
-                    : row.userId;
+                    : (row.userId || '—');
+                const seenLabel = formatEnemyTownSeenLabel(row, nowMs);
+                const seenClass = row.visible ? 'town-seen-current' : 'town-seen-ago';
+                const rowClass = row.visible ? '' : ' class="town-row-stale"';
                 tableRows += `
-                    <tr>
-                        <td class="town-tile">${row.levelId}${row.townId != null ? `<div class="town-tier">T${row.townId}</div>` : ''}</td>
+                    <tr${rowClass}>
+                        <td class="town-tile">${row.levelId}${(() => {
+                            const bits = [];
+                            if (row.townName) bits.push(row.townName);
+                            if (row.farmReward != null) bits.push(`${row.farmReward}/min`);
+                            else if (row.townId != null) bits.push(`tier ${row.townId}`);
+                            return bits.length ? `<div class="town-tier">${bits.join(' · ')}</div>` : '';
+                        })()}</td>
+                        <td class="${seenClass}">${seenLabel}</td>
                         <td class="town-user">${userCell}${power ? `<div class="town-power">${power}</div>` : ''}</td>
                         <td class="town-lineup">
-                            <div>${row.lineupLabel}</div>
-                            <div class="town-meta">Pet: ${row.petLabel} · ${row.bannerLabel}</div>
+                            <div>${row.lineupLabel || '—'}</div>
+                            <div class="town-meta">Pet: ${row.petLabel || '—'} · ${row.bannerLabel || '—'}</div>
                         </td>
                         <td class="${healthClass}">${healthLabel}</td>
                     </tr>
                 `;
             });
 
+            const title = currentCount === rows.length
+                ? `Visible Enemy Towns (${currentCount})`
+                : `Visible Enemy Towns (${currentCount} current · ${rows.length})`;
+
             return `
                 <div class="aoc-clan-stats" id="enemy-towns-section">
                     <div class="aoc-clan-stats-header">
-                        <div class="aoc-clan-stats-title">Visible Enemy Towns (${enemyTownDefenses.length})</div>
-                        <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Refresh visible enemy towns">🔄 Refresh</button>
+                        <div class="aoc-clan-stats-title">${title}</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Refresh enemy towns (also auto every 15s)">🔄 Refresh</button>
                     </div>
                     <table class="aoc-clan-stats-table aoc-enemy-towns-table">
                         <thead>
                             <tr>
                                 <th>Tile</th>
+                                <th>Seen</th>
                                 <th>User</th>
                                 <th>Lineup / Pet / Banner</th>
                                 <th>Health</th>
@@ -3879,15 +4128,34 @@
             <div class="aoc-clan-stats" id="enemy-towns-section">
                 <div class="aoc-clan-stats-header">
                     <div class="aoc-clan-stats-title">Visible Enemy Towns</div>
-                    <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Load visible enemy towns">🔄 Load</button>
+                    <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Load enemy towns (also auto every 15s)">🔄 Load</button>
                 </div>
                 <div class="aoc-clan-stats-loading">${
                     enemyTownDefenses && enemyTownDefenses.length === 0
-                        ? 'No visible enemy farm towns found.'
-                        : 'Enemy town defenses not loaded. Click "Load" to fetch.'
+                        ? 'No enemy farm towns seen recently.'
+                        : 'Enemy town defenses not loaded. Click "Load" or wait for auto-refresh.'
                 }</div>
             </div>
         `;
+    }
+
+    function stopEnemyTownAutoRefresh() {
+        if (enemyTownAutoRefreshTimer) {
+            clearInterval(enemyTownAutoRefreshTimer);
+            enemyTownAutoRefreshTimer = null;
+        }
+    }
+
+    function startEnemyTownAutoRefresh(refreshFn) {
+        stopEnemyTownAutoRefresh();
+        if (typeof refreshFn !== 'function') return;
+        enemyTownAutoRefreshTimer = setInterval(() => {
+            if (!document.getElementById('enemy-towns-section')) {
+                stopEnemyTownAutoRefresh();
+                return;
+            }
+            refreshFn({ silent: true });
+        }, ENEMY_TOWN_AUTO_REFRESH_MS);
     }
 
     async function getCurrentPosition() {
@@ -4654,6 +4922,8 @@
         const { HWHFuncs } = window;
         
         if (document.getElementById('aoc-popup-container')) return;
+        stopEnemyTownAutoRefresh();
+        syncEnemyTownDefensesFromHistory();
 
         const styles = `
             .aoc-popup-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10001; }
@@ -4724,6 +4994,9 @@
             .aoc-enemy-towns-table .town-power { color: #4CAF50; font-size: 9px; }
             .aoc-enemy-towns-table .town-lineup { line-height: 1.35; }
             .aoc-enemy-towns-table .town-meta { color: #aaa; font-size: 9px; margin-top: 2px; }
+            .aoc-enemy-towns-table .town-seen-current { color: #4CAF50; font-weight: bold; white-space: nowrap; }
+            .aoc-enemy-towns-table .town-seen-ago { color: #aaa; white-space: nowrap; font-size: 11px; }
+            .aoc-enemy-towns-table tr.town-row-stale { opacity: 0.72; }
             .aoc-enemy-towns-table .town-health-full { color: #4CAF50; white-space: nowrap; }
             .aoc-enemy-towns-table .town-health-dmg { color: #FF9800; white-space: nowrap; }
             .aoc-enemy-towns-table .town-health-dead { color: #ff6b6b; font-weight: bold; white-space: nowrap; }
@@ -4907,43 +5180,68 @@
             refreshBtn.addEventListener('click', refreshClanStats);
         }
 
-        const refreshEnemyTowns = async () => {
-            const btn = document.getElementById('refresh-enemy-towns-btn');
-            if (!btn) return;
-            btn.disabled = true;
-            btn.textContent = '⏳ Loading...';
-            await loadEnemyTownDefenses();
+        const rerenderEnemyTownsSection = () => {
             const section = document.getElementById('enemy-towns-section');
-            if (section) {
-                const wrapper = document.createElement('div');
-                wrapper.innerHTML = buildEnemyTownDefensesHtml();
-                const next = wrapper.firstElementChild;
-                if (next) {
-                    section.replaceWith(next);
-                    const newBtn = document.getElementById('refresh-enemy-towns-btn');
-                    if (newBtn) newBtn.addEventListener('click', refreshEnemyTowns);
+            if (!section) return;
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = buildEnemyTownDefensesHtml();
+            const next = wrapper.firstElementChild;
+            if (!next) return;
+            section.replaceWith(next);
+            const newBtn = document.getElementById('refresh-enemy-towns-btn');
+            if (newBtn) newBtn.addEventListener('click', () => refreshEnemyTowns());
+        };
+
+        const refreshEnemyTowns = async (opts = {}) => {
+            const silent = !!opts?.silent;
+            if (enemyTownRefreshInFlight) return;
+            if (!document.getElementById('enemy-towns-section')) {
+                stopEnemyTownAutoRefresh();
+                return;
+            }
+
+            enemyTownRefreshInFlight = true;
+            const btn = document.getElementById('refresh-enemy-towns-btn');
+            if (btn && !silent) {
+                btn.disabled = true;
+                btn.textContent = '⏳ Loading...';
+            }
+            try {
+                await loadEnemyTownDefenses();
+                if (document.getElementById('enemy-towns-section')) {
+                    rerenderEnemyTownsSection();
                 }
-            } else {
-                btn.disabled = false;
-                btn.textContent = '🔄 Refresh';
+            } finally {
+                enemyTownRefreshInFlight = false;
+                const liveBtn = document.getElementById('refresh-enemy-towns-btn');
+                if (liveBtn) {
+                    liveBtn.disabled = false;
+                    liveBtn.textContent = '🔄 Refresh';
+                }
             }
         };
 
         const enemyTownsBtn = document.getElementById('refresh-enemy-towns-btn');
         if (enemyTownsBtn) {
-            enemyTownsBtn.addEventListener('click', refreshEnemyTowns);
+            enemyTownsBtn.addEventListener('click', () => refreshEnemyTowns());
         }
-        
+        startEnemyTownAutoRefresh(refreshEnemyTowns);
+
+        const closeAocPopup = () => {
+            stopEnemyTownAutoRefresh();
+            backdrop.remove();
+        };
+
         backdrop.addEventListener('click', (e) => {
             if (e.target === backdrop || e.target.classList.contains('aoc-close-btn')) {
-                backdrop.remove();
+                closeAocPopup();
             }
         });
         
         document.getElementById('aoc-start-recording-btn').addEventListener('click', () => {
             if (isRecording) {
                 stopRecording();
-                backdrop.remove();
+                closeAocPopup();
                 if (recordingBuffer.length > 0) {
                     openCreateRecordingPopup();
                 } else {
@@ -4953,7 +5251,7 @@
                 }
             } else {
                 startRecording();
-                backdrop.remove();
+                closeAocPopup();
                 openMainPopup();
             }
         });
