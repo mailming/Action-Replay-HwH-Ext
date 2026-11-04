@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.1
+// @version      3.0.2
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -2880,7 +2880,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.2.0";
+    const EXTENSION_VERSION = "2.3.0";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -2903,6 +2903,7 @@
     let currentlyPlayingRecordingId = null;
     let recordingAborted = false;
     let clanStats = null; // Store all clan stats: [{ clanId, clanName, power, serverId, coins }, ...]
+    let enemyTownDefenses = null; // Occupied enemy farm towns with defense details
 
     // --- STORAGE KEYS ---
     const STORAGE_RECORDINGS = 'aocAutoMovement_recordings';
@@ -2916,10 +2917,16 @@
     ]);
 
     // --- TOWER POSITIONS ---
-    // Tower positions extracted from townPositions in moveResponse.json, Moreresponse3.json, and moveResponse2.json
+    // Farm/town tiles from map mapExtraData.townLevels (mapId 3)
     const TOWER_POSITIONS = new Set([
-        1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596
+        1, 26, 29, 33, 36, 98, 101, 112, 115, 123, 126, 333, 336, 340, 343, 356, 359, 375, 378, 394, 397, 404, 407, 423, 426, 436, 439, 446, 449, 465, 468, 585, 588, 596, 599
     ]);
+
+    const PET_NAMES = {
+        6000: 'Fenris', 6001: 'Oliver', 6002: 'Merlin', 6003: 'Mara', 6004: 'Cain',
+        6005: 'Albus', 6006: 'Axel', 6007: 'Biscuit', 6008: 'Khorus', 6009: 'Vex',
+        6011: 'Robin',
+    };
 
     function shouldRecordAPICall(apiName) {
         if (!apiName || typeof apiName !== 'string') return false;
@@ -3113,6 +3120,7 @@
         updatePlayAllButton();
         scheduleAutoRuns();
         loadClanStats(); // Load clan stats on initialization
+        loadEnemyTownDefenses(); // Prefetch occupied enemy farm towns
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
     }
@@ -3566,6 +3574,301 @@
             console.error('AOC: Error loading clan stats:', error);
             clanStats = null;
         }
+    }
+
+    function aocUnitName(unitId) {
+        const id = Number(unitId);
+        if (!Number.isFinite(id)) return String(unitId);
+        try {
+            const key = id >= 6000 && id < 7000 ? `LIB_PET_NAME_${id}` : `LIB_HERO_NAME_${id}`;
+            const translated = window.cheats?.translate?.(key);
+            if (translated && translated !== key) return translated;
+        } catch {
+            // fall through
+        }
+        if (id >= 6000 && id < 7000) return PET_NAMES[id] || `Pet ${id}`;
+        return `Hero ${id}`;
+    }
+
+    function findClanIdForUser(userId, mapState) {
+        if (!userId || !mapState?.users) return null;
+        const userIdStr = String(userId);
+        for (const clanId of Object.keys(mapState.users)) {
+            const members = mapState.users[clanId];
+            if (!members) continue;
+            if (Array.isArray(members)) {
+                if (members.map(String).includes(userIdStr)) return String(clanId);
+            } else if (typeof members === 'object') {
+                if (Object.prototype.hasOwnProperty.call(members, userIdStr)
+                    || Object.prototype.hasOwnProperty.call(members, userId)
+                    || Object.keys(members).map(String).includes(userIdStr)) {
+                    return String(clanId);
+                }
+            }
+        }
+        return null;
+    }
+
+    function resolvePlayerClanId(mapState) {
+        const fromUserInfo = getPlayerClanId();
+        if (fromUserInfo) return String(fromUserInfo);
+        try {
+            const myId = window.HWHFuncs?.getUserInfo?.()?.id
+                || window.HWHFuncs?.getUserInfo?.()?.userId
+                || null;
+            if (myId != null) {
+                const clanId = findClanIdForUser(myId, mapState);
+                if (clanId) return clanId;
+            }
+        } catch {
+            // ignore
+        }
+        return null;
+    }
+
+    function parseEnemyTownDefenseEntry(entry, levelId, townInfo = {}) {
+        const units = entry?.defense?.units || {};
+        const defenseState = entry?.defenseState || {};
+        const heroes = [];
+        let pet = null;
+        let anyDead = false;
+        let fullHealth = true;
+        let heroChecked = false;
+
+        for (const unit of Object.values(units)) {
+            const id = Number(unit?.id);
+            if (!Number.isFinite(id)) continue;
+            if (id >= 6000 && id < 7000) {
+                pet = {
+                    id,
+                    name: aocUnitName(id),
+                    power: unit.power ?? null,
+                };
+                continue;
+            }
+            if (id <= 0 || id >= 6000) continue;
+
+            const state = defenseState[id] || defenseState[String(id)] || {};
+            const hp = state.hp != null ? Number(state.hp) : null;
+            const maxHp = state.maxHp != null ? Number(state.maxHp) : null;
+            const isDead = state.isDead === true || (hp != null && hp <= 0);
+            if (isDead) anyDead = true;
+            if (hp != null && maxHp != null && maxHp > 0 && hp < maxHp) fullHealth = false;
+            if (hp != null || maxHp != null) heroChecked = true;
+
+            heroes.push({
+                id,
+                name: aocUnitName(id),
+                power: unit.power ?? null,
+                hp,
+                maxHp,
+                isDead,
+            });
+        }
+
+        if (!heroChecked) fullHealth = false;
+
+        const banner = entry?.defense?.banner || null;
+        let bannerSlots = [];
+        if (Array.isArray(banner?.slots)) {
+            bannerSlots = banner.slots.map(Number).filter((n) => Number.isFinite(n));
+        } else if (banner?.slots && typeof banner.slots === 'object') {
+            bannerSlots = Object.keys(banner.slots)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((key) => Number(banner.slots[key]))
+                .filter((n) => Number.isFinite(n));
+        }
+
+        return {
+            levelId: Number(levelId),
+            townId: townInfo.townId ?? null,
+            farmStart: townInfo.farmStart ?? null,
+            userId: String(entry?.userId ?? townInfo.userId ?? ''),
+            powerSum: entry?.defense?.powerSum ?? null,
+            heroes,
+            pet,
+            bannerId: banner?.id != null ? Number(banner.id) : null,
+            bannerSlots,
+            fullHealth: heroChecked ? fullHealth && !anyDead : null,
+            anyDead,
+            lineupLabel: heroes.map((h) => h.name).join(', ') || 'Unknown',
+            petLabel: pet?.name || '—',
+            bannerLabel: banner?.id != null
+                ? `B${banner.id}${bannerSlots.length ? ` [${bannerSlots.join(',')}]` : ''}`
+                : '—',
+        };
+    }
+
+    async function loadEnemyTownDefenses() {
+        try {
+            const { Send } = window;
+            if (!Send) {
+                enemyTownDefenses = [];
+                return;
+            }
+
+            const mapState = await getMapState();
+            if (!mapState?.townPositions) {
+                enemyTownDefenses = [];
+                return;
+            }
+
+            const playerClanId = resolvePlayerClanId(mapState);
+            const occupiedEnemyTowns = [];
+
+            for (const [levelIdStr, townInfo] of Object.entries(mapState.townPositions)) {
+                const levelId = Number(levelIdStr);
+                const userId = townInfo?.userId;
+                if (userId == null || userId === 0 || userId === '0') continue;
+
+                const occupantClanId = findClanIdForUser(userId, mapState);
+                const sameClan = playerClanId && occupantClanId && String(occupantClanId) === String(playerClanId);
+                if (sameClan || isTeammate(userId, mapState)) continue;
+
+                occupiedEnemyTowns.push({
+                    levelId,
+                    userId: String(userId),
+                    townId: townInfo.townId ?? null,
+                    farmStart: townInfo.farmStart ?? null,
+                    clanId: occupantClanId,
+                    clanName: (occupantClanId && mapState.clans?.[occupantClanId]?.title) || null,
+                });
+            }
+
+            occupiedEnemyTowns.sort((a, b) => a.levelId - b.levelId);
+            const details = [];
+
+            for (const town of occupiedEnemyTowns) {
+                try {
+                    const response = await Send({
+                        calls: [{
+                            name: 'clanDomination_getEnemyTeams',
+                            args: { levelId: town.levelId },
+                            context: { actionTs: Math.floor(performance.now()) },
+                            ident: 'body',
+                        }],
+                    });
+                    const result = response?.results?.find((r) => r.ident === 'body');
+                    const list = result?.result?.response;
+                    if (!Array.isArray(list) || list.length === 0) {
+                        details.push({
+                            ...town,
+                            heroes: [],
+                            pet: null,
+                            bannerId: null,
+                            bannerSlots: [],
+                            fullHealth: null,
+                            anyDead: null,
+                            powerSum: null,
+                            lineupLabel: '(no team data)',
+                            petLabel: '—',
+                            bannerLabel: '—',
+                            unavailable: true,
+                        });
+                        continue;
+                    }
+
+                    const entry = list.find((row) => String(row?.userId) === String(town.userId)) || list[0];
+                    const parsed = parseEnemyTownDefenseEntry(entry, town.levelId, town);
+                    details.push({
+                        ...parsed,
+                        clanId: town.clanId,
+                        clanName: town.clanName,
+                        unavailable: false,
+                    });
+                } catch (error) {
+                    console.warn(`AOC: Failed to load enemy team at town ${town.levelId}:`, error);
+                    details.push({
+                        ...town,
+                        heroes: [],
+                        pet: null,
+                        bannerId: null,
+                        bannerSlots: [],
+                        fullHealth: null,
+                        anyDead: null,
+                        powerSum: null,
+                        lineupLabel: '(fetch failed)',
+                        petLabel: '—',
+                        bannerLabel: '—',
+                        unavailable: true,
+                    });
+                }
+            }
+
+            enemyTownDefenses = details;
+            console.log(`AOC: Loaded ${details.length} occupied enemy town defense(s)`);
+        } catch (error) {
+            console.error('AOC: Error loading enemy town defenses:', error);
+            enemyTownDefenses = [];
+        }
+    }
+
+    function buildEnemyTownDefensesHtml() {
+        if (enemyTownDefenses && enemyTownDefenses.length > 0) {
+            let tableRows = '';
+            enemyTownDefenses.forEach((row) => {
+                const healthLabel = row.unavailable
+                    ? 'N/A'
+                    : [
+                        row.fullHealth === true ? 'Full HP' : (row.fullHealth === false ? 'Damaged' : 'Unknown'),
+                        row.anyDead ? '· Dead in lineup' : '· No dead',
+                    ].join(' ');
+                const healthClass = row.anyDead
+                    ? 'town-health-dead'
+                    : (row.fullHealth ? 'town-health-full' : 'town-health-dmg');
+                const power = row.powerSum != null ? Number(row.powerSum).toLocaleString() : '';
+                const userCell = row.clanName
+                    ? `${row.userId}<div class="town-clan">${row.clanName}</div>`
+                    : row.userId;
+                tableRows += `
+                    <tr>
+                        <td class="town-tile">${row.levelId}${row.townId != null ? `<div class="town-tier">T${row.townId}</div>` : ''}</td>
+                        <td class="town-user">${userCell}${power ? `<div class="town-power">${power}</div>` : ''}</td>
+                        <td class="town-lineup">
+                            <div>${row.lineupLabel}</div>
+                            <div class="town-meta">Pet: ${row.petLabel} · ${row.bannerLabel}</div>
+                        </td>
+                        <td class="${healthClass}">${healthLabel}</td>
+                    </tr>
+                `;
+            });
+
+            return `
+                <div class="aoc-clan-stats" id="enemy-towns-section">
+                    <div class="aoc-clan-stats-header">
+                        <div class="aoc-clan-stats-title">Occupied Enemy Towns (${enemyTownDefenses.length})</div>
+                        <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Refresh occupied enemy towns">🔄 Refresh</button>
+                    </div>
+                    <table class="aoc-clan-stats-table aoc-enemy-towns-table">
+                        <thead>
+                            <tr>
+                                <th>Tile</th>
+                                <th>User</th>
+                                <th>Lineup / Pet / Banner</th>
+                                <th>Health</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="aoc-clan-stats" id="enemy-towns-section">
+                <div class="aoc-clan-stats-header">
+                    <div class="aoc-clan-stats-title">Occupied Enemy Towns</div>
+                    <button class="aoc-clan-stats-refresh" id="refresh-enemy-towns-btn" title="Load occupied enemy towns">🔄 Load</button>
+                </div>
+                <div class="aoc-clan-stats-loading">${
+                    enemyTownDefenses && enemyTownDefenses.length === 0
+                        ? 'No enemy-occupied farm towns found.'
+                        : 'Enemy town defenses not loaded. Click "Load" to fetch.'
+                }</div>
+            </div>
+        `;
     }
 
     async function getCurrentPosition() {
@@ -4394,6 +4697,17 @@
             .aoc-clan-stats-table .clan-coins { color: #FFD700; font-size: 10px; text-align: right; }
             .aoc-clan-stats-table .clan-power { color: #4CAF50; font-size: 10px; text-align: right; }
             .aoc-clan-stats-loading { color: #aaa; font-style: italic; font-size: 11px; }
+            .aoc-enemy-towns-table td { vertical-align: top; }
+            .aoc-enemy-towns-table .town-tile { font-weight: bold; color: #ffd700; white-space: nowrap; }
+            .aoc-enemy-towns-table .town-tier { color: #aaa; font-size: 9px; font-weight: normal; }
+            .aoc-enemy-towns-table .town-user { white-space: nowrap; }
+            .aoc-enemy-towns-table .town-clan { color: #aaa; font-size: 9px; }
+            .aoc-enemy-towns-table .town-power { color: #4CAF50; font-size: 9px; }
+            .aoc-enemy-towns-table .town-lineup { line-height: 1.35; }
+            .aoc-enemy-towns-table .town-meta { color: #aaa; font-size: 9px; margin-top: 2px; }
+            .aoc-enemy-towns-table .town-health-full { color: #4CAF50; white-space: nowrap; }
+            .aoc-enemy-towns-table .town-health-dmg { color: #FF9800; white-space: nowrap; }
+            .aoc-enemy-towns-table .town-health-dead { color: #ff6b6b; font-weight: bold; white-space: nowrap; }
         `;
         
         const styleSheet = document.createElement("style");
@@ -4463,9 +4777,12 @@
             `;
         }
         
+        const enemyTownsHtml = buildEnemyTownDefensesHtml();
+
         popup.innerHTML = `
             <button class="aoc-close-btn">&times;</button>
             <h2>AOC Auto Movement</h2>
+            ${enemyTownsHtml}
             ${clanStatsHtml}
             <div class="aoc-donate-section">
                 <label style="color: #fce1ac; font-weight: bold;">Donate Coins:</label>
@@ -4569,6 +4886,33 @@
         const refreshBtn = document.getElementById('refresh-clan-stats-btn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', refreshClanStats);
+        }
+
+        const refreshEnemyTowns = async () => {
+            const btn = document.getElementById('refresh-enemy-towns-btn');
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = '⏳ Loading...';
+            await loadEnemyTownDefenses();
+            const section = document.getElementById('enemy-towns-section');
+            if (section) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = buildEnemyTownDefensesHtml();
+                const next = wrapper.firstElementChild;
+                if (next) {
+                    section.replaceWith(next);
+                    const newBtn = document.getElementById('refresh-enemy-towns-btn');
+                    if (newBtn) newBtn.addEventListener('click', refreshEnemyTowns);
+                }
+            } else {
+                btn.disabled = false;
+                btn.textContent = '🔄 Refresh';
+            }
+        };
+
+        const enemyTownsBtn = document.getElementById('refresh-enemy-towns-btn');
+        if (enemyTownsBtn) {
+            enemyTownsBtn.addEventListener('click', refreshEnemyTowns);
         }
         
         backdrop.addEventListener('click', (e) => {
