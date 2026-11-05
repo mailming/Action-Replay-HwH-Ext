@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.9
+// @version      3.0.10
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -2880,7 +2880,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "AOC Auto Movement";
-    const EXTENSION_VERSION = "2.3.7";
+    const EXTENSION_VERSION = "2.3.8";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -3993,6 +3993,7 @@
 
             const playerClanId = resolvePlayerClanId(mapState);
             const occupiedEnemyTowns = [];
+            const allyOwnedLevelIds = new Set(); // tiles now held by us / teammates → drop history
             getTownNameMap(liveMapId); // warm cache for this map version
 
             for (const [levelIdStr, townInfo] of Object.entries(mapState.townPositions)) {
@@ -4002,7 +4003,10 @@
 
                 const occupantClanId = findClanIdForUser(userId, mapState);
                 const sameClan = playerClanId && occupantClanId && String(occupantClanId) === String(playerClanId);
-                if (sameClan || isTeammate(userId, mapState)) continue;
+                if (sameClan || isTeammate(userId, mapState)) {
+                    allyOwnedLevelIds.add(String(levelId));
+                    continue;
+                }
 
                 occupiedEnemyTowns.push({
                     levelId,
@@ -4021,6 +4025,11 @@
             const nowMs = Date.now();
             const history = pruneEnemyTownHistory(loadEnemyTownHistory(), nowMs);
             const visibleLevelIds = new Set();
+
+            // Captured by our team: remove stale enemy records for those tiles.
+            for (const key of allyOwnedLevelIds) {
+                if (history[key]) delete history[key];
+            }
 
             for (const town of occupiedEnemyTowns) {
                 const key = String(town.levelId);
@@ -4096,6 +4105,10 @@
             }
 
             for (const [key, row] of Object.entries(history)) {
+                if (allyOwnedLevelIds.has(key)) {
+                    delete history[key];
+                    continue;
+                }
                 if (!visibleLevelIds.has(key)) {
                     history[key] = { ...row, visible: false };
                 }
