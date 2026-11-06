@@ -5593,9 +5593,16 @@ function getAutoGifts() {
 		send(freebieCheckCalls, (e) => {
 			let countGetGifts = 0;
 			const gifts = [];
-			for (check of e.results) {
+			const results = Array.isArray(e?.results) ? e.results : [];
+			if (!results.length) {
+				if (e?.error) {
+					console.log(`${I18N('GIFTS')}: ${e.error.name || 'error'} - ${e.error.description || ''}`);
+				}
+				return;
+			}
+			for (const check of results) {
 				gifts.push(check.ident);
-				if (check.result.response != null) {
+				if (check.result?.response != null) {
 					countGetGifts++;
 				}
 			}

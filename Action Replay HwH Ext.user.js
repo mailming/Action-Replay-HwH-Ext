@@ -24,7 +24,6 @@
     let recordings = [];
     let isRecording = false;
     let recordingBuffer = [];
-    let originalSend = null;
     let recordingButton = null; // Reference to the recording button
     let recordingButtonText = null; // Cached reference to button text element
     let playAllButton = null; // Reference to the play all button
@@ -227,16 +226,6 @@
         // Load settings (rush mode)
         loadSettings();
 
-        // Setup API interception
-        setupAPIInterseption();
-        
-        // Verify interception worked
-        if (originalSend) {
-            console.log('Action Replay: Action capture setup complete');
-        } else {
-            console.warn('Action Replay: Action capture may not be working - originalSend is null');
-        }
-
         // Add menu button, recording button, and play all button in the same row
         const scriptMenu = HWHClasses.ScriptMenu.getInst();
         const buttonGroup = scriptMenu.addCombinedButton([
@@ -310,17 +299,6 @@
         }
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
-    }
-
-    // --- API INTERCEPTION ---
-    function setupAPIInterseption() {
-        // Keep HeroWarsHelper's Send function. Replacing window.Send is unnecessary
-        // because calls are captured from XMLHttpRequest, and a wrapper can change
-        // the function HeroWarsHelper already published.
-        if (window.Send && !originalSend) {
-            originalSend = window.Send;
-        }
-        console.log('Action Replay: Action capture setup complete (XHR already intercepted early)');
     }
 
     // --- STORAGE SYSTEM ---
@@ -2888,7 +2866,6 @@
     let isRecording = false;
     let recordingBuffer = [];
     let recordingInitialPosition = null; // Store initial position when recording starts
-    let originalSend = null;
     let recordingButton = null;
     let recordingButtonText = null;
     let playAllButton = null;
@@ -3093,7 +3070,6 @@
         HWHFuncs.addExtentionName(EXTENSION_NAME, EXTENSION_VERSION, EXTENSION_AUTHOR);
 
         loadRecordings();
-        setupAPIInterseption();
 
         const scriptMenu = HWHClasses.ScriptMenu.getInst();
         const buttonGroup = scriptMenu.addCombinedButton([
@@ -3132,14 +3108,6 @@
         startEnemyTownBackgroundRefresh(); // scan while AOC event is live (not only menu-open)
 
         console.log(`${EXTENSION_NAME} initialized successfully.`);
-    }
-
-    // --- API INTERCEPTION ---
-    function setupAPIInterseption() {
-        // Do not replace window.Send. HeroWarsHelper owns that function.
-        if (window.Send && !originalSend) {
-            originalSend = window.Send;
-        }
     }
 
     // --- STORAGE SYSTEM ---
@@ -4305,21 +4273,6 @@
         }
     }
 
-    function getRemainingMovesFromResponse(response) {
-        try {
-            if (response && response.results && response.results.length > 0) {
-                const result = response.results.find(r => r.ident === 'body');
-                if (result && result.result && result.result.response && result.result.response.refillable) {
-                    return result.result.response.refillable.amount;
-                }
-            }
-            return null;
-        } catch (error) {
-            console.error('AOC: Error extracting remaining moves from response:', error);
-            return null;
-        }
-    }
-
     // --- TOWER POSITION HELPER FUNCTIONS ---
     function getPlayerClanId() {
         try {
@@ -4630,43 +4583,30 @@
                                                             const errorDetails = {
                                                                 name: error.name || 'Unknown',
                                                                 description: error.description || 'No description',
-                                                                code: error.code || null,
-                                                                data: error.data || null
+                                                                code: error.code || null
                                                             };
                                                             const errorMsg = `Battle Error: ${errorDetails.name} - ${errorDetails.description}${errorDetails.code ? ` (Code: ${errorDetails.code})` : ''}`;
                                                             const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
-                                                            console.error(fullErrorMsg);
-                                                            console.error('AOC: Full battle error response:', JSON.stringify(error, null, 2));
+                                                            console.error(fullErrorMsg, error);
                                                             HWHFuncs.setProgress(fullErrorMsg, false);
-                                                            
-                                                            // Log additional error data if available
-                                                            if (errorDetails.data) {
-                                                                console.error('AOC: Battle error data:', JSON.stringify(errorDetails.data, null, 2));
-                                                            }
                                                             totalFailureCount++;
                                                             battleSuccess = false;
                                                         } else {
                                                             const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully against enemy ${targetEnemyId}`;
                                                             console.log(successMsg);
-                                                            // Log battle response details
-                                                            if (battleResult.result.response) {
-                                                                console.log('AOC: Battle response:', JSON.stringify(battleResult.result.response, null, 2));
-                                                            }
                                                             HWHFuncs.setProgress(successMsg, false);
                                                             totalSuccessCount++;
                                                             battleSuccess = true;
                                                         }
                                                     } else {
                                                         const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: Unexpected battle response structure`;
-                                                        console.warn(warningMsg);
-                                                        console.warn('AOC: Battle response:', JSON.stringify(battleResponse, null, 2));
+                                                        console.warn(warningMsg, battleResponse);
                                                         totalSuccessCount++;
                                                         battleSuccess = true; // Assume success if no error found
                                                     }
                                                 } else {
                                                     const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: No results in battle response`;
-                                                    console.warn(warningMsg);
-                                                    console.warn('AOC: Battle response:', JSON.stringify(battleResponse, null, 2));
+                                                    console.warn(warningMsg, battleResponse);
                                                     const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully against enemy ${targetEnemyId}`;
                                                     console.log(successMsg);
                                                     HWHFuncs.setProgress(successMsg, false);
@@ -4771,8 +4711,7 @@
                         
                         const errorMsg = `Top-level API Error: ${errorName} - ${errorDescription}`;
                         const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
-                        console.error(fullErrorMsg);
-                        console.error('AOC: Full top-level error response:', JSON.stringify(response, null, 2));
+                        console.error(fullErrorMsg, response);
                         HWHFuncs.setProgress(fullErrorMsg, false);
                         
                         // Log error but continue execution (will queue up anyway)
@@ -4789,19 +4728,12 @@
                                 const errorDetails = {
                                     name: error.name || 'Unknown',
                                     description: error.description || 'No description',
-                                    code: error.code || null,
-                                    data: error.data || null
+                                    code: error.code || null
                                 };
                                 const errorMsg = `API Error: ${errorDetails.name} - ${errorDetails.description}${errorDetails.code ? ` (Code: ${errorDetails.code})` : ''}`;
                                 const fullErrorMsg = `AOC: ${recording.name} - [Step ${i + 1}] ${errorMsg}`;
-                                console.error(fullErrorMsg);
-                                console.error('AOC: Full error response:', JSON.stringify(error, null, 2));
+                                console.error(fullErrorMsg, error);
                                 HWHFuncs.setProgress(fullErrorMsg, false);
-                                
-                                // Log additional error data if available
-                                if (errorDetails.data) {
-                                    console.error('AOC: Error data:', JSON.stringify(errorDetails.data, null, 2));
-                                }
                                 
                                 // Log error but continue execution (will queue up anyway)
                                 totalFailureCount++;
@@ -4827,8 +4759,6 @@
                                             return;
                                         }
                                     }
-                                    // Log full move response for debugging
-                                    console.log('AOC: Move response:', JSON.stringify(moveResponse, null, 2));
                                 } else if (call.name === 'clanDomination_getEnemyTeams') {
                                     const enemyResponse = result.result.response;
                                     if (Array.isArray(enemyResponse)) {
@@ -4838,28 +4768,17 @@
                                             console.log(logMsg);
                                             HWHFuncs.setProgress(logMsg, false);
                                         }
-                                        // Log full enemy teams response
-                                        console.log('AOC: Enemy teams response:', JSON.stringify(enemyResponse, null, 2));
                                     }
                                 } else if (call.name === 'clanDomination_startBattle') {
-                                    const battleResponse = result.result.response;
                                     const successMsg = `AOC: ${recording.name} - [Step ${i + 1}] Battle completed successfully`;
                                     console.log(successMsg);
-                                    // Log battle response summary
-                                    if (battleResponse && typeof battleResponse === 'object') {
-                                        console.log('AOC: Battle response summary:', JSON.stringify(battleResponse, null, 2));
-                                    }
                                     HWHFuncs.setProgress(successMsg, false);
                                 } else if (call.name === 'clanDomination_mapState') {
                                     const mapStateResponse = result.result.response;
-                                    console.log('AOC: Map state response received');
-                                    // Optionally log map state summary
                                     if (mapStateResponse && typeof mapStateResponse === 'object') {
-                                        const summary = {
-                                            userPositions: mapStateResponse.userPositions ? Object.keys(mapStateResponse.userPositions).length : 0,
-                                            townPositions: mapStateResponse.townPositions ? Object.keys(mapStateResponse.townPositions).length : 0
-                                        };
-                                        console.log('AOC: Map state summary:', JSON.stringify(summary, null, 2));
+                                        const userCount = mapStateResponse.userPositions ? Object.keys(mapStateResponse.userPositions).length : 0;
+                                        const townCount = mapStateResponse.townPositions ? Object.keys(mapStateResponse.townPositions).length : 0;
+                                        console.log(`AOC: Map state summary: ${userCount} users, ${townCount} towns`);
                                     }
                                 }
                             }
@@ -4867,8 +4786,7 @@
                     } else {
                         // No response or unexpected response structure
                         const warningMsg = `AOC: ${recording.name} - [Step ${i + 1}] Warning: Unexpected response structure for ${call.name}`;
-                        console.warn(warningMsg);
-                        console.warn('AOC: Response:', JSON.stringify(response, null, 2));
+                        console.warn(warningMsg, response);
                     }
                     
                     // Check if this was a battle and add cooldown
