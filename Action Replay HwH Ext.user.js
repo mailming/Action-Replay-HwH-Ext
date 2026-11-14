@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.10
+// @version      3.0.11
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -17,7 +17,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.2.4";
+    const EXTENSION_VERSION = "1.2.5";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -70,6 +70,16 @@
     const HERO_TOURNAMENT_TYPE = 'heroes';
     const TITAN_TOURNAMENT_TYPE = 'titans';
     const HERO_TOURNAMENT_END_AUTO_COLLECT_SECS = 5 * 60; // Force quest collect in last 5 minutes
+
+    function isSupportedTournamentType(type) {
+        return type === HERO_TOURNAMENT_TYPE || type === TITAN_TOURNAMENT_TYPE;
+    }
+
+    function tournamentKindLabel(type) {
+        if (type === HERO_TOURNAMENT_TYPE) return 'Hero';
+        if (type === TITAN_TOURNAMENT_TYPE) return 'Titan';
+        return null;
+    }
 
     function enqueueExecution(taskFn) {
         // Ensure tasks run one-at-a-time, in order, even if a task fails.
@@ -1536,8 +1546,8 @@
             const now = Math.floor(Date.now() / 1000);
             const inWindow = now >= (stateData.startTime || 0) && now <= (stateData.endTime || 0);
             const typeLive = stateData.state === 1 && inWindow;
-            // Hero Tournament Mode / GoE only when type is heroes
-            const active = typeLive && stateData.type === HERO_TOURNAMENT_TYPE;
+            // Ranking actions run for both Hero and Titan tournaments. Gift of Elements stays hero-only.
+            const active = typeLive && isSupportedTournamentType(stateData.type);
 
             heroTournamentEventActive = active;
             heroTournamentEventInfo = {
@@ -1566,10 +1576,10 @@
         return heroTournamentEventActive === true && heroTournamentEventInfo?.type === HERO_TOURNAMENT_TYPE;
     }
 
-    /** True during the last 5 minutes of Hero Tournament (type=heroes), before endTime. */
+    /** True during the last 5 minutes of a live Hero or Titan tournament, before endTime. */
     function isWithinHeroTournamentEndAutoCollectWindow() {
         const info = heroTournamentEventInfo;
-        if (!info || info.type !== HERO_TOURNAMENT_TYPE || !info.endTime) return false;
+        if (!info || !isSupportedTournamentType(info.type) || !info.endTime) return false;
         const now = Math.floor(Date.now() / 1000);
         const secsUntilEnd = info.endTime - now;
         return secsUntilEnd >= 0 && secsUntilEnd <= HERO_TOURNAMENT_END_AUTO_COLLECT_SECS;
@@ -1587,8 +1597,9 @@
             }
         }
         if (labelText) {
+            const kind = tournamentKindLabel(heroTournamentEventInfo?.type) || 'Tournament';
             labelText.textContent = forced
-                ? '🎁 Auto Collect Quest Rewards (forced ON — Hero Tournament ending in ≤5 min)'
+                ? `🎁 Auto Collect Quest Rewards (forced ON — ${kind} Tournament ending in ≤5 min)`
                 : '🎁 Auto Collect Quest Rewards (collects rewards recursively on script load)';
         }
     }
@@ -1600,7 +1611,7 @@
         }
 
         const info = heroTournamentEventInfo;
-        if (!info || info.type !== HERO_TOURNAMENT_TYPE || !info.endTime) {
+        if (!info || !isSupportedTournamentType(info.type) || !info.endTime) {
             updateAutoCollectForcedByTournamentUI();
             return;
         }
@@ -1609,7 +1620,7 @@
         const msUntilWindow = windowStartMs - Date.now();
 
         if (msUntilWindow > 0) {
-            console.log(`Action Replay: Hero Tournament - Will force quest collect in ${Math.ceil(msUntilWindow / 1000)}s (last 5 min before end)`);
+            console.log(`Action Replay: ${tournamentKindLabel(info.type) || 'Tournament'} Tournament - Will force quest collect in ${Math.ceil(msUntilWindow / 1000)}s (last 5 min before end)`);
             heroTournamentEndAutoCollectTimer = setTimeout(() => {
                 heroTournamentEndAutoCollectTimer = null;
                 maybeForceAutoCollectNearHeroTournamentEnd();
@@ -1638,7 +1649,8 @@
         heroTournamentEndAutoCollectTournamentId = tournamentId;
         try {
             const secsLeft = heroTournamentEventInfo.endTime - Math.floor(Date.now() / 1000);
-            console.log(`Action Replay: Hero Tournament ending in ${secsLeft}s — forcing Auto Collect Quest Rewards (ignores setting)`);
+            const kind = tournamentKindLabel(heroTournamentEventInfo?.type) || 'Tournament';
+            console.log(`Action Replay: ${kind} Tournament ending in ${secsLeft}s — forcing Auto Collect Quest Rewards (ignores setting)`);
             const { HWHFuncs } = window;
             if (HWHFuncs) {
                 HWHFuncs.setProgress('Action Replay: Event ending soon — auto-collecting quest rewards...', false);
@@ -1675,29 +1687,37 @@
 
         const info = heroTournamentEventInfo;
         const endStr = info?.endTime ? new Date(info.endTime * 1000).toLocaleString() : '';
+        const kind = tournamentKindLabel(info?.type);
+
+        const typeLabel = document.getElementById('tournament-mode-type-label');
+        if (typeLabel) {
+            typeLabel.textContent = kind ? `(${kind})` : '';
+        }
 
         if (heroTournamentEventActive === true) {
             badge.textContent = '● LIVE';
             badge.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
             badge.style.color = '#fff';
-            badge.title = endStr ? `Hero Tournament is live until ${endStr}` : 'Hero Tournament is live';
-        } else if (info?.typeLive && info.type === TITAN_TOURNAMENT_TYPE) {
-            badge.textContent = '○ TITAN';
+            const liveName = kind ? `${kind} Tournament` : 'Tournament';
+            badge.title = endStr ? `${liveName} is live until ${endStr}` : `${liveName} is live`;
+        } else if (info?.typeLive) {
+            badge.textContent = '○ IDLE';
             badge.style.background = 'rgba(100,100,100,0.6)';
             badge.style.color = '#ccc';
+            const idleName = kind ? `${kind} Tournament` : 'Tournament';
             badge.title = endStr
-                ? `Titan Tournament is live until ${endStr} (Hero Tournament Mode idle)`
-                : 'Titan Tournament is live (Hero Tournament Mode idle)';
+                ? `${idleName} is live until ${endStr} (Tournament Mode idle)`
+                : `${idleName} is live (Tournament Mode idle)`;
         } else if (heroTournamentEventActive === false) {
             badge.textContent = '○ OFF';
             badge.style.background = 'rgba(100,100,100,0.6)';
             badge.style.color = '#ccc';
-            badge.title = 'Hero Tournament is not active';
+            badge.title = 'Tournament is not active';
         } else {
             badge.textContent = '…';
             badge.style.background = 'rgba(0,0,0,0.4)';
             badge.style.color = '#aaa';
-            badge.title = 'Checking Hero Tournament status…';
+            badge.title = 'Checking tournament status…';
         }
 
         updateHeroTournamentGoEVisibility();
@@ -1911,7 +1931,10 @@
             // Force quest collect in the last 5 minutes regardless of autoCollectRewards setting
             await maybeForceAutoCollectNearHeroTournamentEnd();
             if (!eventState.active) {
-                console.log('Action Replay: Hero Tournament - Event not active, skipping actions');
+                const kind = tournamentKindLabel(eventState.type);
+                console.log(kind
+                    ? `Action Replay: ${kind} Tournament is outside its live window, skipping actions`
+                    : 'Action Replay: Tournament not active, skipping actions');
             } else {
                 // Fetch ranking and execute recordings / GoE if needed (this will wait for completion)
                 await fetchHeroTournamentRanking();
@@ -2148,7 +2171,8 @@
                 </label>
                 <label style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fce1ac; margin-left: 15px;">
                     <input type="checkbox" id="hero-tournament-mode-checkbox" ${heroTournamentMode ? 'checked' : ''} style="margin-right: 5px;">
-                    <span>🏆 Hero Tournament Mode</span>
+                    <span>🏆 Tournament Mode</span>
+                    <span id="tournament-mode-type-label"></span>
                 </label>
                 <span id="hero-tournament-live-badge" style="padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; letter-spacing: 0.5px; background: rgba(0,0,0,0.4); color: #aaa;">…</span>
                 <label style="display: flex; align-items: center; gap: 8px; color: #fce1ac;">
