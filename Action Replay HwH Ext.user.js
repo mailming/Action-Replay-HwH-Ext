@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.11
+// @version      3.0.13
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -17,7 +17,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.2.5";
+    const EXTENSION_VERSION = "1.2.7";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -65,7 +65,6 @@
     const GOE_TARGET_GIFT_LEVEL = 29;
     const GOE_MIN_USER_LEVEL = 30;
     const GOE_CONSUMABLE_ID_TITAN_GIFT = 24;
-    const GOE_BATCH_SIZE = 50;
     const GOE_RESOURCE_COOLDOWN_MS = 60000;
     const HERO_TOURNAMENT_TYPE = 'heroes';
     const TITAN_TOURNAMENT_TYPE = 'titans';
@@ -1312,7 +1311,7 @@
     }
 
     // --- GIFT OF THE ELEMENTS (Hero Tournament) ---
-    // Algorithm adapted from HWHGiftOfTheElementsExt: upgrade highest-power heroes to lvl 29, one at a time.
+    // Gift of Elements: boost the highest-power hero to level 29, then recheck ranking.
 
     function sortHeroesByPowerDesc(heroes) {
         return [...heroes].sort((a, b) => b.power - a.power);
@@ -1322,8 +1321,21 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    function getGoELevelCost(titanGiftLib, currentLevel) {
+        // Same index HeroWarsHelper uses: cost to leave this Gift of Elements level.
+        const cost = titanGiftLib?.[currentLevel]?.cost;
+        if (!cost) return null;
+        const sparks = Number(cost.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT]
+            ?? cost.consumable?.[String(GOE_CONSUMABLE_ID_TITAN_GIFT)]
+            ?? 0);
+        const gold = Number(cost.gold) || 0;
+        if (!Number.isFinite(sparks) || !Number.isFinite(gold) || (sparks <= 0 && gold <= 0)) return null;
+        return { sparks, gold };
+    }
+
     /**
-     * Upgrade the single highest-power hero still below GoE level 29.
+     * Take the highest-power hero still below GoE level 29 and buy its levels up to 29 in one request.
+     * If gold or sparks run out first, buy only the affordable levels and report goldGone.
      * @returns {{ upgraded: boolean, goldGone: boolean, heroId: number|null, levelsGained: number, estimatedPower: number }}
      */
     async function upgradeHighestHeroGoETo29() {
@@ -1333,83 +1345,59 @@
             return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
         }
 
-        let [heroGetAll, inventory, user] = await new Caller(['heroGetAll', 'inventoryGet', 'userGetInfo']).execute();
-        let heroes = sortHeroesByPowerDesc(Object.values(heroGetAll));
+        const [heroGetAll, inventory, user] = await new Caller(['heroGetAll', 'inventoryGet', 'userGetInfo']).execute();
+        const heroes = sortHeroesByPowerDesc(Object.values(heroGetAll));
         const titanGiftLib = lib.getData('titanGift');
         let titanGift = inventory.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0;
-        let gold = user.gold;
+        let gold = user.gold || 0;
 
         if (user.level < GOE_MIN_USER_LEVEL) {
             console.log('Action Replay: Hero Tournament GoE - Account below team level 30, cannot upgrade');
             return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
         }
 
-        const targetHero = heroes.find(hero => hero.titanGiftLevel < GOE_TARGET_GIFT_LEVEL);
-        if (!targetHero) {
+        const hero = heroes.find(entry => (entry.titanGiftLevel || 0) < GOE_TARGET_GIFT_LEVEL);
+        if (!hero) {
             console.log('Action Replay: Hero Tournament GoE - All heroes already at Gift of Elements level 29+');
             return { upgraded: false, goldGone: false, heroId: null, levelsGained: 0, estimatedPower: 0 };
         }
 
-        let calls = [];
-        let levelsGained = 0;
+        const heroId = hero.id;
+        const startLevel = hero.titanGiftLevel || 0;
+        const calls = [];
         let estimatedPower = 0;
         let goldGone = false;
-        const heroId = targetHero.id;
-        let hero = targetHero;
 
-        const sendCalls = async () => {
-            if (calls.length === 0) return;
-            await Caller.send(calls);
-            levelsGained += calls.length;
-            heroGetAll = await new Caller('heroGetAll').execute();
-            heroes = sortHeroesByPowerDesc(Object.values(heroGetAll));
-            calls = [];
-            hero = heroes.find(entry => entry.id === heroId);
-            if (HWHFuncs) {
-                HWHFuncs.setProgress(
-                    `Action Replay: GoE hero ${heroId} → level ${hero?.titanGiftLevel ?? '?'}`,
-                    false
-                );
-            }
-        };
-
-        console.log(`Action Replay: Hero Tournament GoE - Boosting hero ${heroId} (power ${hero.power}) from GoE ${hero.titanGiftLevel} → ${GOE_TARGET_GIFT_LEVEL}`);
-
-        while (hero && hero.titanGiftLevel < GOE_TARGET_GIFT_LEVEL) {
-            const nextLevelCost = titanGiftLib[hero.titanGiftLevel + 1]?.cost;
-            if (!nextLevelCost) break;
-
-            const costTitanGift = nextLevelCost.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0;
-            if (titanGift < costTitanGift || gold < nextLevelCost.gold) {
-                goldGone = gold < nextLevelCost.gold || titanGift < costTitanGift;
+        for (let level = startLevel; level < GOE_TARGET_GIFT_LEVEL; level++) {
+            const cost = getGoELevelCost(titanGiftLib, level);
+            if (!cost || titanGift < cost.sparks || gold < cost.gold) {
+                goldGone = true;
                 break;
             }
-
-            estimatedPower += GOE_POWER_LEVEL[hero.titanGiftLevel] || 0;
-            calls.push({ name: 'heroTitanGiftLevelUp', args: { heroId: hero.id } });
-            titanGift -= costTitanGift;
-            gold -= nextLevelCost.gold;
-            hero.titanGiftLevel++;
-
-            if (calls.length >= GOE_BATCH_SIZE) {
-                await sendCalls();
-                if (!hero || hero.titanGiftLevel >= GOE_TARGET_GIFT_LEVEL) break;
-            }
+            titanGift -= cost.sparks;
+            gold -= cost.gold;
+            estimatedPower += GOE_POWER_LEVEL[level] || 0;
+            calls.push({ name: 'heroTitanGiftLevelUp', args: { heroId } });
         }
 
-        await sendCalls();
-
-        if (levelsGained === 0) {
-            console.log('Action Replay: Hero Tournament GoE - Not enough gold or sparks of power');
+        if (calls.length === 0) {
+            console.log(`Action Replay: Hero Tournament GoE - Cannot afford next level on hero ${heroId} (level ${startLevel}, gold ${user.gold || 0}, sparks ${inventory.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0})`);
             return { upgraded: false, goldGone: true, heroId, levelsGained: 0, estimatedPower: 0 };
         }
 
-        console.log(`Action Replay: Hero Tournament GoE - Hero ${heroId}: +${levelsGained} level(s), ~${estimatedPower} power${goldGone ? ' (resources depleted)' : ''}`);
-        return { upgraded: true, goldGone, heroId, levelsGained, estimatedPower };
+        const endLevel = startLevel + calls.length;
+        console.log(`Action Replay: Hero Tournament GoE - Hero ${heroId} (power ${hero.power}): GoE ${startLevel} → ${endLevel}${endLevel < GOE_TARGET_GIFT_LEVEL ? ' (stopped before 29, gold or sparks ran out)' : ''}`);
+        await Caller.send(calls);
+
+        if (HWHFuncs) {
+            HWHFuncs.setProgress(`Action Replay: GoE hero ${heroId} → level ${endLevel}`, false);
+        }
+        return { upgraded: true, goldGone, heroId, levelsGained: calls.length, estimatedPower };
     }
 
     /**
-     * Loop: boost highest hero → 29, then recheck ranking, until goal place or resources run out.
+     * Boost the highest-power hero to GoE 29, then recheck ranking. Stop as soon as the goal place
+     * is reached or the next hero cannot be funded.
      */
     async function runHeroTournamentGoEUntilTarget() {
         if (heroTournamentGoERunning) {
@@ -1422,9 +1410,9 @@
 
         try {
             if (HWHFuncs) {
-                HWHFuncs.setProgress('Action Replay: Hero Tournament GoE started (highest → lvl 29)...', false);
+                HWHFuncs.setProgress('Action Replay: Hero Tournament GoE started (highest hero → lvl 29, then recheck)...', false);
             }
-            console.log(`Action Replay: Hero Tournament GoE - Starting boost loop until place ≤ ${heroTournamentGoalPlace} or gold/sparks run out`);
+            console.log(`Action Replay: Hero Tournament GoE - Boost one hero to 29 at a time until place ≤ ${heroTournamentGoalPlace}`);
 
             let totalUpgrades = 0;
             let totalEstimatedPower = 0;
@@ -1463,7 +1451,7 @@
                     console.log('Action Replay: Hero Tournament GoE - Stopped (gold/sparks out or nothing left to upgrade)');
                     heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
                     if (HWHFuncs) {
-                        HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Gold/sparks depleted or all heroes at 29', true);
+                        HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Stopped. Gold/sparks not enough for the next level', true);
                     }
                     break;
                 }
@@ -1471,27 +1459,27 @@
                 totalUpgrades += result.levelsGained;
                 totalEstimatedPower += result.estimatedPower;
 
+                // Points need a moment to update. Rank is checked at the top of the loop before another hero is touched.
+                await delay(2000);
+
+                // This hero could not be finished. Recheck once, then stop instead of starting the next hero.
                 if (result.goldGone) {
-                    // Recheck once more after partial upgrade, then stop if still short
                     const postRanking = await getHeroTournamentRankingInfo();
                     if (postRanking && postRanking.myRank !== null && postRanking.myRank <= heroTournamentGoalPlace) {
-                        console.log(`Action Replay: Hero Tournament GoE - Target placement reached after last boost (place ${postRanking.myRank})`);
+                        console.log(`Action Replay: Hero Tournament GoE - Target placement reached after partial boost (place ${postRanking.myRank})`);
                         heroTournamentGoECooldownUntil = 0;
                         if (HWHFuncs) {
                             HWHFuncs.setProgress(`Action Replay: Hero Tournament GoE - Target place ${heroTournamentGoalPlace} reached!`, true);
                         }
                     } else {
-                        console.log('Action Replay: Hero Tournament GoE - Resources depleted before reaching target');
+                        console.log('Action Replay: Hero Tournament GoE - Gold or sparks ran out before level 29. Not starting another hero.');
                         heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
                         if (HWHFuncs) {
-                            HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Gold/sparks depleted before target', true);
+                            HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Stopped. Not enough gold or sparks to finish this hero', true);
                         }
                     }
                     break;
                 }
-
-                // Brief pause so tournament points can update before next ranking check
-                await delay(1500);
             }
 
             console.log(`Action Replay: Hero Tournament GoE - Done. Upgrades: ${totalUpgrades}, est. power: ${totalEstimatedPower}`);
@@ -2180,7 +2168,7 @@
                     <input type="number" id="hero-tournament-goal-place-input" min="0" max="50" value="${heroTournamentGoalPlace}" style="width: 60px; padding: 4px; background: rgba(0,0,0,0.5); border: 1px solid #ce9767; border-radius: 3px; color: #fce1ac; text-align: center;">
                     <span>place</span>
                 </label>
-                <label id="hero-tournament-goe-label" style="cursor: pointer; display: none; align-items: center; gap: 8px; color: #fce1ac; margin-left: 10px;" title="Hero Tournament only. In addition to recordings: when below goal place, also boost Gift of Elements from highest-power hero to level 29, one hero at a time, until target place or gold/sparks run out">
+                <label id="hero-tournament-goe-label" style="cursor: pointer; display: none; align-items: center; gap: 8px; color: #fce1ac; margin-left: 10px;" title="Hero Tournament only. When below the goal place, raise the highest-power hero's Gift of Elements to level 29, then check ranking again. Stops as soon as the goal is reached or gold/sparks run out.">
                     <input type="checkbox" id="hero-tournament-goe-checkbox" ${heroTournamentGoEMode ? 'checked' : ''} style="margin-right: 5px;">
                     <span>⚡ Gift of Elements</span>
                 </label>
