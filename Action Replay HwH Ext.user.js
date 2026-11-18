@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Action Replay HwH Ext
 // @namespace    HeroWarsHelper.ActionReplay
-// @version      3.0.13
+// @version      3.0.14
 // @description  Action Replay and AOC Auto Movement in one script
 // @author       zzsheep
 // @license      Copyright (c) zzsheep
@@ -17,7 +17,7 @@
 
     // --- CONFIGURATION ---
     const EXTENSION_NAME = "Action Replay";
-    const EXTENSION_VERSION = "1.2.7";
+    const EXTENSION_VERSION = "1.2.8";
     const EXTENSION_AUTHOR = "zzsheep";
 
     // --- STATE VARIABLES ---
@@ -45,7 +45,6 @@
     let heroTournamentInterval = null; // Interval for hero tournament ranking polling
     let heroTournamentGoEMode = false; // Use Gift of Elements to climb hero tournament ranking
     let heroTournamentGoERunning = false; // Prevent overlapping GoE boost loops
-    let heroTournamentGoECooldownUntil = 0; // Avoid spam-retrying when gold/sparks are depleted
     let heroTournamentEventActive = null; // null = unknown, true/false from powerTournament_getState
     let heroTournamentEventInfo = null; // { id, type, startTime, endTime, myPoints }
     let heroTournamentEndAutoCollectTournamentId = null; // Tournament id already force-collected near end
@@ -65,7 +64,6 @@
     const GOE_TARGET_GIFT_LEVEL = 29;
     const GOE_MIN_USER_LEVEL = 30;
     const GOE_CONSUMABLE_ID_TITAN_GIFT = 24;
-    const GOE_RESOURCE_COOLDOWN_MS = 60000;
     const HERO_TOURNAMENT_TYPE = 'heroes';
     const TITAN_TOURNAMENT_TYPE = 'titans';
     const HERO_TOURNAMENT_END_AUTO_COLLECT_SECS = 5 * 60; // Force quest collect in last 5 minutes
@@ -1321,9 +1319,8 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function getGoELevelCost(titanGiftLib, currentLevel) {
-        // Same index HeroWarsHelper uses: cost to leave this Gift of Elements level.
-        const cost = titanGiftLib?.[currentLevel]?.cost;
+    function readGoECost(entry) {
+        const cost = entry?.cost;
         if (!cost) return null;
         const sparks = Number(cost.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT]
             ?? cost.consumable?.[String(GOE_CONSUMABLE_ID_TITAN_GIFT)]
@@ -1331,6 +1328,12 @@
         const gold = Number(cost.gold) || 0;
         if (!Number.isFinite(sparks) || !Number.isFinite(gold) || (sparks <= 0 && gold <= 0)) return null;
         return { sparks, gold };
+    }
+
+    function getGoELevelCost(titanGiftLib, currentLevel) {
+        // The price to leave this level is stored on the next index. Level 0 has no entry of its own,
+        // which is why looking up only the current level bought nothing.
+        return readGoECost(titanGiftLib?.[currentLevel + 1]) || readGoECost(titanGiftLib?.[currentLevel]);
     }
 
     /**
@@ -1381,7 +1384,8 @@
         }
 
         if (calls.length === 0) {
-            console.log(`Action Replay: Hero Tournament GoE - Cannot afford next level on hero ${heroId} (level ${startLevel}, gold ${user.gold || 0}, sparks ${inventory.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0})`);
+            const priced = getGoELevelCost(titanGiftLib, startLevel);
+            console.log(`Action Replay: Hero Tournament GoE - No levels bought for hero ${heroId} at GoE ${startLevel} (gold ${user.gold || 0}, sparks ${inventory.consumable?.[GOE_CONSUMABLE_ID_TITAN_GIFT] || 0}${priced ? `, next level costs ${priced.gold} gold and ${priced.sparks} sparks` : ', no price found in titanGift data'})`);
             return { upgraded: false, goldGone: true, heroId, levelsGained: 0, estimatedPower: 0 };
         }
 
@@ -1439,7 +1443,6 @@
 
                 if (ranking.myRank <= heroTournamentGoalPlace) {
                     console.log(`Action Replay: Hero Tournament GoE - Target placement reached (place ${ranking.myRank})`);
-                    heroTournamentGoECooldownUntil = 0;
                     if (HWHFuncs) {
                         HWHFuncs.setProgress(`Action Replay: Hero Tournament GoE - Target place ${heroTournamentGoalPlace} reached!`, true);
                     }
@@ -1448,10 +1451,9 @@
 
                 const result = await upgradeHighestHeroGoETo29();
                 if (!result.upgraded) {
-                    console.log('Action Replay: Hero Tournament GoE - Stopped (gold/sparks out or nothing left to upgrade)');
-                    heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
+                    console.log('Action Replay: Hero Tournament GoE - Stopped (gold/sparks out, no price, or nothing left to upgrade)');
                     if (HWHFuncs) {
-                        HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Stopped. Gold/sparks not enough for the next level', true);
+                        HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Stopped before buying a level', true);
                     }
                     break;
                 }
@@ -1460,20 +1462,18 @@
                 totalEstimatedPower += result.estimatedPower;
 
                 // Points need a moment to update. Rank is checked at the top of the loop before another hero is touched.
-                await delay(2000);
+                await delay(500);
 
                 // This hero could not be finished. Recheck once, then stop instead of starting the next hero.
                 if (result.goldGone) {
                     const postRanking = await getHeroTournamentRankingInfo();
                     if (postRanking && postRanking.myRank !== null && postRanking.myRank <= heroTournamentGoalPlace) {
                         console.log(`Action Replay: Hero Tournament GoE - Target placement reached after partial boost (place ${postRanking.myRank})`);
-                        heroTournamentGoECooldownUntil = 0;
                         if (HWHFuncs) {
                             HWHFuncs.setProgress(`Action Replay: Hero Tournament GoE - Target place ${heroTournamentGoalPlace} reached!`, true);
                         }
                     } else {
                         console.log('Action Replay: Hero Tournament GoE - Gold or sparks ran out before level 29. Not starting another hero.');
-                        heroTournamentGoECooldownUntil = Date.now() + GOE_RESOURCE_COOLDOWN_MS;
                         if (HWHFuncs) {
                             HWHFuncs.setProgress('Action Replay: Hero Tournament GoE - Stopped. Not enough gold or sparks to finish this hero', true);
                         }
@@ -1802,11 +1802,6 @@
 
         // GoE runs in addition to recordings when enabled — Hero Tournament (type=heroes) only
         if (heroTournamentGoEMode && isHeroTournamentLive()) {
-            if (Date.now() < heroTournamentGoECooldownUntil) {
-                const secsLeft = Math.ceil((heroTournamentGoECooldownUntil - Date.now()) / 1000);
-                console.log(`Action Replay: Hero Tournament GoE - Cooling down after resource depletion (${secsLeft}s left)`);
-                return;
-            }
             console.log(`Action Replay: Hero Tournament Ranking - Starting Gift of Elements boost (in addition to recordings)...`);
             await runHeroTournamentGoEUntilTarget();
         }
@@ -2293,7 +2288,6 @@
         });
         document.getElementById('hero-tournament-goe-checkbox').addEventListener('change', (e) => {
             heroTournamentGoEMode = e.target.checked;
-            heroTournamentGoECooldownUntil = 0; // Allow immediate retry when toggled
             saveSettings();
             console.log(`Action Replay: Hero Tournament Gift of Elements ${heroTournamentGoEMode ? 'enabled' : 'disabled'}`);
         });
